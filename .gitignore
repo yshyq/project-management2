@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+frontend/dist/
+
+# Python caches and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backend/**/__pycache__/
+backend/.pytest-*/
+
+# Local databases and backups
+*.db
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/*.bak
+
+# Runtime and test artifacts
+.runtime/
+.test-tmp/
+.tmp-chrome-profile/
+screenshots/
+frontend/.e2e-runtime/
+frontend/e2e-artifacts/
+frontend/test-results/
+frontend/playwright-report/
+
+# Logs
+*.log
+backend/*.log
+frontend/*.log
+
+# Local agent/workspace metadata
+.superpowers/

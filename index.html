@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>运维项目管理系统</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="login-screen">
+      <div class="login-panel">
+        <div class="brand login-brand">
+          <div class="brand-mark">O</div>
+          <div>
+            <strong>OpsProject</strong>
+            <span>选择登录入口</span>
+          </div>
+        </div>
+        <div class="login-grid">
+          <button class="login-card" id="admin-login">
+            <strong>管理员后台管理页面</strong>
+            <span>配置流程、产品名称、用户菜单权限、凭证和运维资产</span>
+          </button>
+          <button class="login-card primary-login" id="user-login">
+            <strong>普通用户登录页面</strong>
+            <span>默认只查看工作台、项目台账、项目支持</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="app-shell hidden" id="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">O</div>
+          <div>
+            <strong>OpsProject</strong>
+            <span>运维项目管理</span>
+          </div>
+          <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="收起菜单" title="收起菜单">☰</button>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item" data-view="adminHome" title="后台首页">
+            <span class="icon">⌘</span><span>后台首页</span>
+          </button>
+          <button class="nav-item active" data-view="dashboard" title="工作台">
+            <span class="icon">⌂</span><span>工作台</span>
+          </button>
+          <button class="nav-item" data-view="projects" title="项目台账">
+            <span class="icon">▦</span><span>项目台账</span>
+          </button>
+          <button class="nav-item nav-parent" data-view="supportDeploy" title="协同支持">
+            <span class="icon">◇</span><span>协同支持</span>
+          </button>
+          <div class="sub-nav" data-menu-group="support">
+            <button class="nav-item sub-item" data-view="customerInfo" title="客户信息">客户信息</button>
+            <button class="nav-item sub-item" data-view="supportDeploy" title="项目部署">项目部署</button>
+            <button class="nav-item sub-item" data-view="supportTech" title="技术支持">技术支持</button>
+            <button class="nav-item sub-item" data-view="supportNeed" title="项目需求">项目需求</button>
+            <button class="nav-item sub-item" data-view="supportOther" title="其他支持">其他支持</button>
+          </div>
+          <button class="nav-item" data-view="assets" title="运维资产">
+            <span class="icon">▣</span><span>运维资产</span>
+          </button>
+          <button class="nav-item nav-parent" data-view="flow" title="配置">
+            <span class="icon">☰</span><span>配置</span>
+          </button>
+          <div class="sub-nav" data-menu-group="config">
+            <button class="nav-item sub-item" data-view="flow" title="流程">流程</button>
+            <button class="nav-item sub-item" data-view="projectNames" title="产品名称">产品名称</button>
+            <button class="nav-item sub-item" data-view="supportTypes" title="使用类型">使用类型</button>
+            <button class="nav-item sub-item" data-view="credentials" title="客户凭证">客户凭证</button>
+          </div>
+          <button class="nav-item nav-parent" data-view="users" title="用户管理">
+            <span class="icon">☷</span><span>用户管理</span>
+          </button>
+          <div class="sub-nav" data-menu-group="users">
+            <button class="nav-item sub-item" data-view="users" title="用户">用户</button>
+            <button class="nav-item sub-item" data-view="roles" title="角色">角色</button>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="role-eyebrow">运维视角</p>
+            <h1 id="page-title">运维工作台</h1>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button" id="primary-create" title="新增当前功能">＋</button>
+            <button class="secondary-button" id="logout-button">退出</button>
+          </div>
+        </header>
+
+        <section class="view" id="adminHome-view">
+          <div class="metrics-grid">
+            <article class="metric">
+              <span>流程模板</span>
+              <strong id="admin-flow-count">3</strong>
+              <small>支持自定义使用类型</small>
+            </article>
+            <article class="metric success">
+              <span>产品名称</span>
+              <strong id="admin-project-name-count">3</strong>
+              <small>edhr / edhr MAX / MedPro5</small>
+            </article>
+            <article class="metric warning">
+              <span>用户权限</span>
+              <strong>5</strong>
+              <small>可配置菜单可见性</small>
+            </article>
+            <article class="metric neutral">
+              <span>凭证规则</span>
+              <strong>4</strong>
+              <small>交付/研发默认申请查看</small>
+            </article>
+          </div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>后台管理范围</h2>
+                <p>管理员负责配置流程、产品名称、用户菜单权限、客户凭证和运维资产。</p>
+              </div>
+            </div>
+            <div class="admin-actions">
+              <button class="primary-button" data-shortcut="flow">配置流程</button>
+              <button class="primary-button" data-shortcut="projectNames">配置产品名称</button>
+              <button class="primary-button" data-shortcut="supportTypes">配置使用类型</button>
+              <button class="primary-button" data-shortcut="users">配置用户权限</button>
+              <button class="primary-button" data-shortcut="credentials">管理凭证</button>
+              <button class="primary-button" data-shortcut="assets">管理运维资产</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="view active" id="dashboard-view">
+          <div class="metrics-grid">
+            <article class="metric">
+              <span>待运维处理</span>
+              <strong>18</strong>
+              <small>6 个即将超时</small>
+            </article>
+            <article class="metric success">
+              <span>上线记录</span>
+              <strong>24</strong>
+              <small>本月登记记录</small>
+            </article>
+            <article class="metric warning">
+              <span>高优先级支持</span>
+              <strong>7</strong>
+              <small>生产问题 3 个</small>
+            </article>
+            <article class="metric neutral">
+              <span>资产完整度</span>
+              <strong>84%</strong>
+              <small>12 个项目待补凭证</small>
+            </article>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h2>客户支持情况</h2>
+                  <p>按客户汇总部署、运维支持、Bug 和新需求分布</p>
+                </div>
+                <div class="segmented" role="tablist" aria-label="统计周期">
+                  <button class="active" data-range="week">本周</button>
+                  <button data-range="month">本月</button>
+                  <button data-range="quarter">季度</button>
+                </div>
+              </div>
+              <div class="support-bars" id="support-bars"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head compact">
+                <h2>上线记录</h2>
+                <span class="badge blue">可登记</span>
+              </div>
+              <div class="timeline" id="golive-list">
+                <div class="timeline-item done">
+                  <strong>edhr</strong>
+                  <span>v2.8.1 已记录部署结果</span>
+                </div>
+                <div class="timeline-item active">
+                  <strong>edhr MAX</strong>
+                  <span>生产部署记录待补充</span>
+                </div>
+                <div class="timeline-item">
+                  <strong>MedPro5</strong>
+                  <span>回滚方案待关联支持单</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="projects-view">
+          <div class="toolbar">
+            <div class="filter-group">
+              <button class="filter active" data-filter="all">全部</button>
+              <button class="filter" data-filter="online">已上线</button>
+              <button class="filter" data-filter="deploying">部署中</button>
+              <button class="filter" data-filter="risk">有风险</button>
+            </div>
+            <button class="primary-button" id="add-project">＋ 新建项目台账</button>
+          </div>
+          <div class="project-filter-panel">
+            <label>快速搜索
+              <input id="project-keyword-filter" list="project-keyword-options" type="search" placeholder="输入客户、产品、负责人、状态" />
+              <datalist id="project-keyword-options"></datalist>
+            </label>
+            <label>客户名称
+              <input id="project-customer-filter" list="project-customer-options" type="search" placeholder="输入或选择已有客户" />
+              <datalist id="project-customer-options"></datalist>
+            </label>
+            <label>产品/服务
+              <input id="project-product-filter" list="project-product-options" type="search" placeholder="输入 edhr / edhr MAX / MedPro5" />
+              <datalist id="project-product-options"></datalist>
+            </label>
+            <label>负责人
+              <input id="project-owner-filter" list="project-owner-options" type="search" placeholder="输入项目经理、交付、研发、运维" />
+              <datalist id="project-owner-options"></datalist>
+            </label>
+            <label>上线状态
+              <input id="project-online-filter" list="project-online-options" type="search" placeholder="输入已上线、部署中、运维中" />
+              <datalist id="project-online-options"></datalist>
+            </label>
+            <button class="secondary-button" id="clear-project-filters">清空筛选</button>
+          </div>
+          <div class="project-layout">
+            <section class="panel list-panel wide-table-panel">
+              <div class="table" id="project-table"></div>
+            </section>
+            <aside class="panel project-detail-panel" id="project-detail" aria-label="项目台账详情"></aside>
+          </div>
+        </section>
+
+        <section class="view" id="support-view">
+          <div class="support-page">
+            <section class="support-searchbar">
+              <label>名称：
+                <input id="support-keyword-filter" type="search" placeholder="请输入事务名称、客户、产品或处理人" />
+              </label>
+              <div class="button-row">
+                <button class="secondary-button" id="clear-support-filter">重 置</button>
+                <button class="primary-button" id="search-support-filter">查 询</button>
+              </div>
+            </section>
+            <div class="support-table-actions">
+              <button class="primary-button" id="add-support-ticket">新建</button>
+            </div>
+            <section class="support-table-panel">
+              <div class="support-table" id="support-board"></div>
+              <div class="support-pagination">
+                <span id="support-total">共 0 条数据</span>
+                <div class="pager-controls">
+                  <button class="page-button active">1</button>
+                  <button class="secondary-button">20 条/页⌄</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel support-messages">
+              <div class="panel-head compact">
+                <h2>系统消息</h2>
+                <span class="badge blue" id="message-count">0</span>
+              </div>
+              <div class="message-list" id="system-message-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="customerInfo-view">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>客户信息</h2>
+                <p>维护协同支持使用的客户基础资料，包含客户名称、销售和客户说明。</p>
+              </div>
+              <button class="primary-button" id="add-customer">＋ 新增客户</button>
+            </div>
+            <div class="user-table" id="customer-table"></div>
+          </div>
+        </section>
+
+        <section class="view" id="assets-view">
+          <div class="asset-layout">
+            <section class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h2>生产服务器</h2>
+                  <p>服务器、环境、用途、部署路径和到期时间</p>
+                </div>
+                <button class="primary-button" id="add-server">＋ 新增服务器</button>
+              </div>
+              <div class="server-grid" id="server-grid"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head compact">
+                <h2>访问方式</h2>
+                <span class="badge green">已同步</span>
+              </div>
+              <div class="access-list">
+                <div><span>系统入口</span><strong>https://ops.example.cn</strong></div>
+                <div><span>管理后台</span><strong>VPN + /admin</strong></div>
+                <div><span>远程方式</span><strong>堡垒机 / SSH</strong></div>
+                <div><span>部署方式</span><strong>Docker Compose</strong></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="flow-view">
+          <div class="flow-layout">
+            <section class="panel">
+              <div class="panel-head compact">
+                <h2>流程模板</h2>
+              </div>
+              <div class="flow-list">
+                <button class="flow-template active" data-flow="ops">交付 → 运维</button>
+                <button class="flow-template" data-flow="devops">交付 → 研发 → 运维</button>
+                <button class="flow-template" data-flow="custom">客户现场升级流程</button>
+              </div>
+            </section>
+            <section class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h2 id="flow-title">交付 → 运维</h2>
+                  <p id="flow-desc">适用于部署、环境、访问、服务器、证书等运维类支持</p>
+                </div>
+                <div class="button-row">
+                  <button class="secondary-button" id="save-flow">保存流程</button>
+                  <button class="primary-button" id="add-flow">＋ 新增流程</button>
+                </div>
+              </div>
+              <div class="flow-canvas" id="flow-canvas"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="projectNames-view">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>产品名称配置</h2>
+                <p>维护可选产品名称，默认包含 edhr、edhr MAX、MedPro5；一个客户可以关联多个产品或多套项目服务。</p>
+              </div>
+              <button class="primary-button" id="add-project-name">＋ 新增产品名称</button>
+            </div>
+            <div class="name-config-list" id="project-name-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="supportTypes-view">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>使用类型配置</h2>
+                <p>维护流程适用类型和项目支持类型，流程配置中只能选择这里已配置的类型。</p>
+              </div>
+              <button class="primary-button" id="add-support-type">＋ 新增使用类型</button>
+            </div>
+            <div class="name-config-list" id="support-type-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="credentials-view">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>客户凭证管理</h2>
+                <p>支持按客户和凭证类型筛选；每次只能申请一个具体凭证类型，管理员也按类型分别授权</p>
+              </div>
+              <button class="primary-button" id="add-credential">＋ 新增客户凭证</button>
+            </div>
+            <div class="credential-table" id="credential-table"></div>
+          </div>
+        </section>
+
+        <section class="view" id="users-view">
+          <div class="user-layout">
+            <section class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h2>用户管理</h2>
+                  <p>维护运维、交付、研发、项目经理等账号和角色权限</p>
+                </div>
+                <button class="primary-button" id="add-user">＋ 新增用户</button>
+              </div>
+              <div class="user-table" id="user-table"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head compact">
+                <h2>凭证查看规则</h2>
+                <span class="badge amber">需审批</span>
+              </div>
+              <div class="rule-list">
+                <div><strong>运维管理员</strong><span>接收查看申请，同意后用户才能查看明文</span></div>
+                <div><strong>运维人员</strong><span>负责客户可申请或被授权查看</span></div>
+                <div><strong>交付人员</strong><span>默认可进凭证管理菜单，凭证明文需申请</span></div>
+                <div><strong>研发人员</strong><span>默认可进凭证管理菜单，凭证明文需申请</span></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="roles-view">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>角色管理</h2>
+                <p>维护系统管理员、运维、交付、研发、项目经理等角色和菜单权限范围</p>
+              </div>
+              <button class="primary-button" id="add-role">＋ 新增角色</button>
+            </div>
+            <div class="user-table" id="role-table"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="create-modal" aria-hidden="true">
+      <form class="modal" aria-label="新增表单">
+        <div class="modal-head">
+          <h2 id="create-modal-title">新建支持单</h2>
+          <button type="button" class="icon-button" id="close-create" title="关闭">×</button>
+        </div>
+        <div class="form-grid" id="create-form-grid"></div>
+        <div class="field-note" id="create-field-note">请确认字段是否覆盖实际录入需要。</div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" id="cancel-create">取消</button>
+          <button type="button" class="primary-button" id="submit-create">提交</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

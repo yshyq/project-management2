@@ -1,0 +1,30 @@
+{
+  "name": "ops-project-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "build": "vue-tsc --noEmit && vite build --config vite.config.mjs",
+    "preview": "node scripts/preview-server.mjs",
+    "test": "vitest run --config vite.config.mjs",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:install": "playwright install chromium",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "pinia": "^2.3.1",
+    "vite": "^5.4.19",
+    "vue": "^3.5.16",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9",
+    "vue-tsc": "^2.2.10"
+  }
+}
