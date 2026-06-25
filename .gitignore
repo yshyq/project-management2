@@ -34,5 +34,8 @@ frontend/playwright-report/
 backend/*.log
 frontend/*.log
 
+# Local deployment bundles
+*-deploy.zip
+
 # Local agent/workspace metadata
 .superpowers/
