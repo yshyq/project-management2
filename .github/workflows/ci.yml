@@ -2,7 +2,7 @@ name: CI - Build & Test
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, vs-dev*]
     paths-ignore:
       - 'docs/**'
       - 'scripts/**'
