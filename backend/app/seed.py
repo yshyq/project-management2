@@ -161,5 +161,7 @@ def seed(db: Session) -> None:
 
 
 def ensure_database() -> None:
+    from .database import Base, engine
+    Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed(db)

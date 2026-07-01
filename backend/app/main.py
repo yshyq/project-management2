@@ -1,11 +1,16 @@
+import os
+import uuid
+import hashlib
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -15,6 +20,9 @@ from .database import get_db
 from .security import create_access_token, decode_access_token, decrypt_secret, encrypt_secret, mask_secret, verify_password
 from .seed import ensure_database
 
+
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -191,6 +199,18 @@ def credential_read(credential: models.Credential) -> dict:
     }
 
 
+def notification_read(notification: models.Notification) -> dict:
+    return {
+        "id": notification.id,
+        "title": notification.title,
+        "content": notification.content,
+        "refType": notification.ref_type,
+        "refId": notification.ref_id,
+        "isRead": notification.is_read,
+        "createdAt": notification.created_at,
+    }
+
+
 def get_or_404(db: Session, model, item_id: int):
     item = db.get(model, item_id)
     if not item:
@@ -228,6 +248,62 @@ def reject_generic_deployment_mutation(ticket: models.SupportTicket) -> None:
 def require_ticket_status(ticket: models.SupportTicket, allowed: set[str], action_name: str) -> None:
     if ticket.status not in allowed:
         raise HTTPException(status_code=409, detail=f"当前状态“{ticket.status}”不允许{action_name}")
+
+
+def add_process_log(
+    db: Session,
+    ticket: models.SupportTicket,
+    action: str,
+    operator_id: int | None = None,
+    handler_id: int | None = None,
+    remark: str = "",
+) -> models.TicketProcessLog:
+    log = models.TicketProcessLog(
+        ticket_id=ticket.id,
+        action=action,
+        from_status=ticket.status,
+        to_status=ticket.status,
+        operator_id=operator_id,
+        handler_id=handler_id,
+        remark=remark,
+    )
+    db.add(log)
+    return log
+
+
+def add_notification(
+    db: Session,
+    user_id: int,
+    title: str,
+    content: str = "",
+    ref_type: str = "",
+    ref_id: int | None = None,
+) -> models.Notification:
+    notification = models.Notification(
+        user_id=user_id,
+        title=title,
+        content=content,
+        ref_type=ref_type,
+        ref_id=ref_id,
+    )
+    db.add(notification)
+    return notification
+
+
+def notify_handler(
+    db: Session,
+    ticket: models.SupportTicket,
+    action_label: str,
+) -> None:
+    if ticket.current_handler_id:
+        add_notification(
+            db,
+            user_id=ticket.current_handler_id,
+            title=f"工单 #{ticket.ticket_no} {action_label}",
+            content=f"工单《{ticket.title}》已{action_label}，请及时处理",
+            ref_type="support_ticket",
+            ref_id=ticket.id,
+        )
 
 
 def commit_ticket(db: Session, ticket: models.SupportTicket) -> dict:
@@ -350,6 +426,19 @@ def default_handler_id(db: Session, support_type: str, payload: schemas.SupportT
 
 def default_status(support_type: str) -> str:
     return "待研发处理" if support_type == "项目需求" else "待运维接收"
+
+
+def process_log_read(log: models.TicketProcessLog) -> dict:
+    return {
+        "id": log.id,
+        "action": log.action,
+        "fromStatus": log.from_status,
+        "toStatus": log.to_status,
+        "operatorName": log.operator.name if log.operator else "",
+        "handlerName": log.handler.name if log.handler else "",
+        "remark": log.remark,
+        "createdAt": log.created_at,
+    }
 
 
 @app.get("/api/health")
@@ -610,6 +699,8 @@ def create_support_ticket(payload: schemas.SupportTicketCreate, db: Session = De
         require_deployment_requester(current_user)
     products, customer_id = resolve_ticket_products(db, payload)
     title = payload.title.strip() if payload.title else f"{payload.project_name}部署申请"
+    status = default_status(payload.support_type)
+    handler_id = default_handler_id(db, payload.support_type, payload)
     item = models.SupportTicket(
         ticket_no=next_ticket_no(db),
         support_type=payload.support_type,
@@ -620,8 +711,8 @@ def create_support_ticket(payload: schemas.SupportTicketCreate, db: Session = De
         priority=payload.priority,
         env=payload.env,
         description=payload.description,
-        status=default_status(payload.support_type),
-        current_handler_id=default_handler_id(db, payload.support_type, payload),
+        status=status,
+        current_handler_id=handler_id,
         requester_id=current_user.id,
     )
     if payload.support_type == "项目部署":
@@ -633,8 +724,15 @@ def create_support_ticket(payload: schemas.SupportTicketCreate, db: Session = De
         )
     replace_ticket_product_links(item, products)
     db.add(item)
+    db.flush()
+
+    add_process_log(db, item, "created", operator_id=current_user.id, handler_id=handler_id, remark=f"创建工单（{payload.support_type}）")
     db.commit()
     db.refresh(item)
+
+    notify_handler(db, item, "分配给您")
+    db.commit()
+
     return ok(ticket_read(item))
 
 
@@ -643,7 +741,7 @@ def update_support_ticket(
     ticket_id: int,
     payload: schemas.SupportTicketCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(require_user),
+    current_user: models.User = Depends(require_user),
 ):
     ticket = get_or_404(db, models.SupportTicket, ticket_id)
     if payload.support_type == "项目部署":
@@ -669,6 +767,7 @@ def update_support_ticket(
     ticket.product_links.clear()
     db.flush()
     replace_ticket_product_links(ticket, products)
+    add_process_log(db, ticket, "updated", operator_id=current_user.id, remark="更新工单")
     db.commit()
     db.refresh(ticket)
     return ok(ticket_read(ticket))
@@ -676,7 +775,36 @@ def update_support_ticket(
 
 @app.get("/api/support-tickets/{ticket_id}")
 def get_support_ticket(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
-    return ok(ticket_read(get_or_404(db, models.SupportTicket, ticket_id)))
+    ticket = get_or_404(db, models.SupportTicket, ticket_id)
+    return ok(ticket_read(ticket))
+
+
+@app.get("/api/support-tickets/{ticket_id}/logs")
+def get_ticket_logs(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+    get_or_404(db, models.SupportTicket, ticket_id)
+    logs = db.scalars(
+        select(models.TicketProcessLog)
+        .where(models.TicketProcessLog.ticket_id == ticket_id)
+        .order_by(models.TicketProcessLog.created_at.desc())
+    ).all()
+    return page([process_log_read(log) for log in logs])
+
+
+@app.get("/api/support-tickets/{ticket_id}/attachments")
+def get_ticket_attachments(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+    get_or_404(db, models.SupportTicket, ticket_id)
+    files = db.scalars(
+        select(models.FileAttachment)
+        .where(models.FileAttachment.biz_type == "support_ticket", models.FileAttachment.biz_id == ticket_id, models.FileAttachment.deleted.is_(False))
+        .order_by(models.FileAttachment.created_at.desc())
+    ).all()
+    return page([{
+        "id": f.id,
+        "fileName": f.file_name,
+        "fileSize": f.file_size,
+        "mimeType": f.mime_type,
+        "createdAt": f.created_at,
+    } for f in files])
 
 
 @app.post("/api/support-tickets/{ticket_id}/receive")
@@ -692,6 +820,7 @@ def receive_deployment(
     ticket.received_at = models.now_utc()
     ticket.current_handler_id = current_user.id
     ticket.status = "待安排部署"
+    add_process_log(db, ticket, "received", operator_id=current_user.id, handler_id=current_user.id, remark="运维Leader接收部署工单")
     return ok(commit_ticket(db, ticket))
 
 
@@ -710,7 +839,11 @@ def assign_deployment(
         raise HTTPException(status_code=400, detail="分配目标必须是启用中的运维人员")
     ticket.current_handler_id = handler.id
     ticket.status = "部署中"
-    return ok(commit_ticket(db, ticket))
+    add_process_log(db, ticket, "assigned", operator_id=current_user.id, handler_id=handler.id, remark=f"分配到{handler.name}")
+    result = commit_ticket(db, ticket)
+    notify_handler(db, ticket, f"已分派给{handler.name}")
+    db.commit()
+    return ok(result)
 
 
 @app.post("/api/support-tickets/{ticket_id}/self-assign")
@@ -724,6 +857,7 @@ def self_assign_deployment(
     require_ticket_status(ticket, {"待安排部署", "部署中"}, "自领")
     ticket.current_handler_id = current_user.id
     ticket.status = "部署中"
+    add_process_log(db, ticket, "self_assigned", operator_id=current_user.id, handler_id=current_user.id, remark="自领部署任务")
     return ok(commit_ticket(db, ticket))
 
 
@@ -762,6 +896,7 @@ def complete_deployment(
     ticket.status = "已部署"
     ticket.deployed_by_id = current_user.id
     ticket.deployed_at = models.now_utc()
+    add_process_log(db, ticket, "deployed", operator_id=current_user.id, handler_id=current_user.id, remark=f"完成部署 {payload.deployment_version}")
     try:
         return ok(commit_ticket(db, ticket))
     except IntegrityError as exc:
@@ -778,27 +913,42 @@ def mutate_ticket(ticket_id: int, action: Callable[[models.SupportTicket], None]
 
 
 @app.post("/api/support-tickets/{ticket_id}/handle")
-def handle_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def handle_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
     def action(ticket: models.SupportTicket):
+        old_status = ticket.status
         ticket.status = payload.next_status or "待交付确认"
         if payload.handler_id:
             ticket.current_handler_id = payload.handler_id
-    return ok(mutate_ticket(ticket_id, action, db))
+        add_process_log(db, ticket, "handled", operator_id=current_user.id, handler_id=payload.handler_id, remark=payload.result or "处理完成")
+    result = mutate_ticket(ticket_id, action, db)
+    ticket = db.get(models.SupportTicket, ticket_id)
+    if ticket and ticket.current_handler_id:
+        notify_handler(db, ticket, "已处理，请确认")
+        db.commit()
+    return ok(result)
 
 
 @app.post("/api/support-tickets/{ticket_id}/transfer")
-def transfer_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def transfer_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
     def action(ticket: models.SupportTicket):
+        old_status = ticket.status
         ticket.status = payload.next_status or "待研发处理"
         ticket.current_handler_id = payload.handler_id
-    return ok(mutate_ticket(ticket_id, action, db))
+        add_process_log(db, ticket, "transferred", operator_id=current_user.id, handler_id=payload.handler_id, remark=payload.result or "转办")
+    result = mutate_ticket(ticket_id, action, db)
+    ticket = db.get(models.SupportTicket, ticket_id)
+    if ticket and ticket.current_handler_id:
+        notify_handler(db, ticket, "已转办给您")
+        db.commit()
+    return ok(result)
 
 
 @app.post("/api/support-tickets/{ticket_id}/close")
-def close_ticket(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def close_ticket(ticket_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
     def action(ticket: models.SupportTicket):
         ticket.status = "已关闭"
         ticket.closed_at = datetime.utcnow()
+        add_process_log(db, ticket, "closed", operator_id=current_user.id, remark="关闭工单")
     return ok(mutate_ticket(ticket_id, action, db))
 
 
@@ -906,6 +1056,27 @@ def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db), curr
     return ok(user_read(item))
 
 
+@app.put("/api/users/{user_id}")
+def update_user(user_id: int, payload: schemas.UserUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    from .security import hash_password
+
+    require_system_admin(current_user)
+    user = get_or_404(db, models.User, user_id)
+    if payload.name is not None:
+        user.name = payload.name
+    if payload.password is not None:
+        user.password_hash = hash_password(payload.password)
+    if payload.dept is not None:
+        user.dept = payload.dept
+    if payload.role_id is not None:
+        user.role_id = payload.role_id
+    if payload.status is not None:
+        user.status = payload.status
+    db.commit()
+    db.refresh(user)
+    return ok(user_read(user))
+
+
 @app.get("/api/roles")
 def list_roles(db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
     require_system_admin(current_user)
@@ -921,3 +1092,131 @@ def create_role(payload: schemas.RoleCreate, db: Session = Depends(get_db), curr
     db.commit()
     db.refresh(item)
     return ok({"id": item.id, "name": item.name})
+
+
+@app.put("/api/roles/{role_id}")
+def update_role(role_id: int, payload: schemas.RoleUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    require_system_admin(current_user)
+    role = get_or_404(db, models.Role, role_id)
+    if payload.name is not None:
+        role.name = payload.name
+    if payload.data_scope is not None:
+        role.data_scope = payload.data_scope
+    if payload.menus is not None:
+        role.menus = ",".join(payload.menus)
+    if payload.credential_policy is not None:
+        role.credential_policy = payload.credential_policy
+    db.commit()
+    db.refresh(role)
+    return ok({"id": role.id, "name": role.name})
+
+
+# --- File Upload ---
+
+
+@app.post("/api/files/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    biz_type: str = Form(""),
+    biz_id: int = Form(0),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_user),
+):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    file_ext = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4().hex}{file_ext}"
+    relative_path = f"{biz_type or 'general'}/{unique_name}"
+    full_path = UPLOAD_DIR / relative_path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = await file.read()
+    if len(content) > 200 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件大小超过限制（200MB）")
+    full_path.write_bytes(content)
+
+    attachment = models.FileAttachment(
+        biz_type=biz_type,
+        biz_id=biz_id if biz_id > 0 else None,
+        file_name=file.filename,
+        file_path=str(full_path),
+        file_size=len(content),
+        mime_type=file.content_type or "application/octet-stream",
+        uploaded_by=current_user.id,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return ok({
+        "id": attachment.id,
+        "fileName": attachment.file_name,
+        "fileUrl": f"/api/files/{attachment.id}/download",
+        "fileSize": attachment.file_size,
+        "mimeType": attachment.mime_type,
+    })
+
+
+@app.get("/api/files/{file_id}/download")
+def download_file(file_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+    attachment = get_or_404(db, models.FileAttachment, file_id)
+    if attachment.deleted:
+        raise HTTPException(status_code=410, detail="文件已删除")
+    file_path = Path(attachment.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        path=str(file_path),
+        filename=attachment.file_name,
+        media_type=attachment.mime_type or "application/octet-stream",
+    )
+
+
+@app.delete("/api/files/{file_id}")
+def delete_file(file_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    attachment = get_or_404(db, models.FileAttachment, file_id)
+    if attachment.uploaded_by != current_user.id:
+        require_system_admin(current_user)
+    attachment.deleted = True
+    db.commit()
+    return ok({"id": file_id})
+
+
+# --- Notifications ---
+
+
+@app.get("/api/notifications")
+def list_notifications(unread: bool = False, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    query = select(models.Notification).where(models.Notification.user_id == current_user.id)
+    if unread:
+        query = query.where(models.Notification.is_read.is_(False))
+    query = query.order_by(models.Notification.created_at.desc())
+    return page([notification_read(item) for item in db.scalars(query).all()])
+
+
+@app.get("/api/notifications/unread-count")
+def unread_notification_count(db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    count = db.scalar(select(func.count(models.Notification.id)).where(models.Notification.user_id == current_user.id, models.Notification.is_read.is_(False))) or 0
+    return ok({"count": count})
+
+
+@app.put("/api/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    notification = get_or_404(db, models.Notification, notification_id)
+    if notification.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权操作该通知")
+    notification.is_read = True
+    notification.read_at = datetime.utcnow()
+    db.commit()
+    return ok()
+
+
+@app.put("/api/notifications/read-all")
+def mark_all_notifications_read(db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    db.execute(
+        models.Notification.__table__.update()
+        .where(models.Notification.user_id == current_user.id, models.Notification.is_read.is_(False))
+        .values(is_read=True, read_at=datetime.utcnow())
+    )
+    db.commit()
+    return ok()

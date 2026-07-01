@@ -213,3 +213,44 @@ export interface AuditLog {
   operatedAt: string;
   clientIp: string;
 }
+
+export interface Notification {
+  id: number;
+  title: string;
+  content: string;
+  refType: string;
+  refId: number | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface UnreadCount {
+  count: number;
+}
+
+export interface TicketProcessLog {
+  id: number;
+  action: string;
+  fromStatus: string;
+  toStatus: string;
+  operatorName: string;
+  handlerName: string;
+  remark: string;
+  createdAt: string;
+}
+
+export interface FileAttachment {
+  id: number;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface UploadResult {
+  id: number;
+  fileName: string;
+  fileUrl: string;
+  fileSize: number;
+  mimeType: string;
+}

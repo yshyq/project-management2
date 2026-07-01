@@ -189,6 +189,16 @@ class SupportTicket(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="SupportTicketProduct.position",
     )
+    process_logs: Mapped[list["TicketProcessLog"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by="TicketProcessLog.created_at.desc()",
+    )
+    attachments: Mapped[list["FileAttachment"]] = relationship(
+        cascade="all, delete-orphan",
+        primaryjoin="and_(FileAttachment.biz_type == 'support_ticket', FileAttachment.biz_id == SupportTicket.id)",
+        foreign_keys="[FileAttachment.biz_id]",
+        uselist=True,
+    )
 
 
 class SupportTicketProduct(Base):
@@ -215,6 +225,58 @@ class DeploymentExtra(Base):
     remote_info: Mapped[str] = mapped_column(Text, default="")
     server_info: Mapped[str] = mapped_column(Text, default="")
     authorization_text: Mapped[str] = mapped_column(Text, default="")
+
+
+class FileAttachment(Base, TimestampMixin):
+    __tablename__ = "file_attachments"
+    __table_args__ = (
+        Index("ix_file_attachments_biz", "biz_type", "biz_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    biz_type: Mapped[str] = mapped_column(String(80), default="")  # 'support_ticket', etc.
+    biz_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    file_path: Mapped[str] = mapped_column(String(512))
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    mime_type: Mapped[str] = mapped_column(String(120), default="")
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class TicketProcessLog(Base):
+    __tablename__ = "ticket_process_logs"
+    __table_args__ = (
+        Index("ix_ticket_process_logs_ticket", "ticket_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id"))
+    action: Mapped[str] = mapped_column(String(80))  # 'created', 'received', 'assigned', 'transferred', 'resolved', 'closed', etc.
+    from_status: Mapped[str] = mapped_column(String(40), default="")
+    to_status: Mapped[str] = mapped_column(String(40), default="")
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    handler_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    operator: Mapped[User | None] = relationship(foreign_keys=[operator_id])
+    handler: Mapped[User | None] = relationship(foreign_keys=[handler_id])
+
+
+class Notification(Base, TimestampMixin):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text, default="")
+    ref_type: Mapped[str] = mapped_column(String(40), default="")  # 'support_ticket', etc.
+    ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
 
 
 class Credential(Base, TimestampMixin):

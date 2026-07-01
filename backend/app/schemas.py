@@ -172,11 +172,26 @@ class UserCreate(CamelModel):
     role_id: int
 
 
+class UserUpdate(CamelModel):
+    name: str | None = None
+    password: str | None = None
+    dept: str | None = None
+    role_id: int | None = None
+    status: str | None = None
+
+
 class RoleCreate(CamelModel):
     name: str
     data_scope: str = "本人"
     menus: list[str] = Field(default_factory=list)
     credential_policy: str = "申请查看"
+
+
+class RoleUpdate(CamelModel):
+    name: str | None = None
+    data_scope: str | None = None
+    menus: list[str] | None = None
+    credential_policy: str | None = None
 
 
 class WorkflowCreate(CamelModel):
@@ -196,3 +211,36 @@ class AuditRead(CamelModel):
     reason: str
     operated_at: datetime
     client_ip: str
+
+
+class NotificationRead(BaseModel):
+    id: int
+    title: str
+    content: str
+    ref_type: str
+    ref_id: int | None
+    is_read: bool
+    created_at: datetime
+
+
+class NotificationUpdate(BaseModel):
+    is_read: bool = True
+
+
+class TicketProcessLogRead(BaseModel):
+    id: int
+    action: str
+    from_status: str
+    to_status: str
+    operator_name: str
+    handler_name: str
+    remark: str
+    created_at: datetime
+
+
+class FileAttachmentRead(BaseModel):
+    id: int
+    file_name: str
+    file_size: int
+    mime_type: str
+    created_at: datetime
