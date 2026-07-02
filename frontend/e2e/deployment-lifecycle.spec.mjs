@@ -112,14 +112,14 @@ async function completeDeployment(page, projectName, environment, verifyRequired
     }
   }
 
-  await modal.locator('[name="environment"]').fill(environment.environment);
-  await modal.locator('[name="innerIp"]').fill(environment.innerIp);
-  await modal.locator('[name="outerIp"]').fill(environment.outerIp);
-  await modal.locator('[name="hostname"]').fill(environment.hostname);
-  await modal.locator('[name="os"]').fill(environment.os);
-  await modal.locator('[name="purpose"]').fill(environment.purpose);
-  await modal.locator('[name="deploymentVersion"]').fill(environment.deploymentVersion);
-  await modal.locator('[name="remark"]').fill(environment.remark);
+  await modal.locator('[name="servers.0.environment"]').fill(environment.environment);
+  await modal.locator('[name="servers.0.innerIp"]').fill(environment.innerIp);
+  await modal.locator('[name="servers.0.outerIp"]').fill(environment.outerIp);
+  await modal.locator('[name="servers.0.hostname"]').fill(environment.hostname);
+  await modal.locator('[name="servers.0.os"]').fill(environment.os);
+  await modal.locator('[name="servers.0.purpose"]').fill(environment.purpose);
+  await modal.locator('[name="servers.0.deploymentVersion"]').fill(environment.deploymentVersion);
+  await modal.locator('[name="servers.0.remark"]').fill(environment.remark);
 
   const responsePromise = page.waitForResponse((response) =>
     response.url().includes("/complete-deployment") && response.request().method() === "POST"

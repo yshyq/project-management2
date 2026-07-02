@@ -1,7 +1,5 @@
 from datetime import datetime
 
-from ipaddress import ip_address
-
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -109,14 +107,14 @@ class TicketAssignment(CamelModel):
     handler_id: int
 
 
-class DeploymentCompletion(CamelModel):
-    environment: str = Field(min_length=1)
-    inner_ip: str = Field(min_length=1)
+class DeploymentServerInfo(CamelModel):
+    environment: str = ""
+    inner_ip: str = ""
     outer_ip: str = ""
-    hostname: str = Field(min_length=1)
-    os: str = Field(min_length=1)
-    purpose: str = Field(min_length=1)
-    deployment_version: str = Field(min_length=1)
+    hostname: str = ""
+    os: str = ""
+    purpose: str = ""
+    deployment_version: str = ""
     remark: str = ""
 
     @field_validator("environment", "inner_ip", "outer_ip", "hostname", "os", "purpose", "deployment_version", "remark")
@@ -124,19 +122,9 @@ class DeploymentCompletion(CamelModel):
     def strip_text(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("environment", "inner_ip", "hostname", "os", "purpose", "deployment_version")
-    @classmethod
-    def require_non_blank(cls, value: str) -> str:
-        if not value:
-            raise ValueError("字段不能为空")
-        return value
 
-    @field_validator("inner_ip", "outer_ip")
-    @classmethod
-    def validate_ip(cls, value: str) -> str:
-        if value:
-            ip_address(value)
-        return value
+class DeploymentCompletion(DeploymentServerInfo):
+    servers: list[DeploymentServerInfo] = Field(default_factory=list)
 
 
 class CredentialCreate(CamelModel):

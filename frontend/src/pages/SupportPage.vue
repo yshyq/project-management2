@@ -103,9 +103,29 @@
             </button>
           </div>
           <div v-else class="button-row" style="margin-top:12px">
-            <button class="secondary-button" type="button" @click="handle('待交付确认')">处理</button>
-            <button class="secondary-button" type="button" @click="handle('待研发处理')">转研发</button>
-            <button class="secondary-button danger" type="button" @click="closeTicket">关闭</button>
+            <template v-if="isAwaitingDeliveryConfirmation">
+              <button
+                class="primary-button"
+                data-test="confirm-ticket"
+                type="button"
+                @click="confirmTicket"
+              >
+                确认完成
+              </button>
+              <button
+                class="secondary-button"
+                data-test="transfer-to-dev"
+                type="button"
+                @click="transferToDev"
+              >
+                转研发
+              </button>
+            </template>
+            <template v-else>
+              <button class="secondary-button" type="button" @click="handle('待交付确认')">处理</button>
+              <button class="secondary-button" type="button" @click="transferToDev">转研发</button>
+              <button class="secondary-button danger" type="button" @click="closeTicket">关闭</button>
+            </template>
           </div>
           <div v-if="actionError" class="error-box">{{ actionError }}</div>
         </template>
@@ -217,45 +237,104 @@
 
     <AppModal :open="completionOpen" title="提交部署结果" @close="completionOpen = false">
       <form id="deployment-completion-form" novalidate @submit.prevent="submitCompletion">
-        <div class="form-grid">
-          <label>
-            环境类型
-            <input v-model="completionForm.environment" name="environment" @input="clearCompletionError('environment')" />
-            <small v-if="completionErrors.environment" class="field-error">{{ completionErrors.environment }}</small>
-          </label>
-          <label>
-            内网 IP
-            <input v-model="completionForm.innerIp" name="innerIp" @input="clearCompletionError('innerIp')" />
-            <small v-if="completionErrors.innerIp" class="field-error">{{ completionErrors.innerIp }}</small>
-          </label>
-          <label>
-            外网 IP
-            <input v-model="completionForm.outerIp" name="outerIp" />
-          </label>
-          <label>
-            主机名
-            <input v-model="completionForm.hostname" name="hostname" @input="clearCompletionError('hostname')" />
-            <small v-if="completionErrors.hostname" class="field-error">{{ completionErrors.hostname }}</small>
-          </label>
-          <label>
-            操作系统
-            <input v-model="completionForm.os" name="os" @input="clearCompletionError('os')" />
-            <small v-if="completionErrors.os" class="field-error">{{ completionErrors.os }}</small>
-          </label>
-          <label>
-            用途
-            <input v-model="completionForm.purpose" name="purpose" @input="clearCompletionError('purpose')" />
-            <small v-if="completionErrors.purpose" class="field-error">{{ completionErrors.purpose }}</small>
-          </label>
-          <label>
-            部署版本
-            <input v-model="completionForm.deploymentVersion" name="deploymentVersion" @input="clearCompletionError('deploymentVersion')" />
-            <small v-if="completionErrors.deploymentVersion" class="field-error">{{ completionErrors.deploymentVersion }}</small>
-          </label>
-          <label class="span-2">
-            备注
-            <textarea v-model="completionForm.remark" name="remark" />
-          </label>
+        <div class="server-list">
+          <div class="server-list-head">
+            <strong>服务器信息</strong>
+            <button
+              class="secondary-button"
+              data-test="add-server"
+              type="button"
+              @click="addCompletionServer"
+            >
+              新增服务器
+            </button>
+          </div>
+          <section
+            v-for="(server, index) in completionServers"
+            :key="index"
+            class="server-entry"
+          >
+            <div class="server-entry-head">
+              <strong>服务器 {{ index + 1 }}</strong>
+              <button
+                v-if="completionServers.length > 1"
+                class="link-button danger"
+                type="button"
+                @click="removeCompletionServer(index)"
+              >
+                删除
+              </button>
+            </div>
+            <div class="form-grid">
+              <label>
+                环境类型
+                <input
+                  v-model="server.environment"
+                  :name="`servers.${index}.environment`"
+                  @input="clearCompletionError(index, 'environment')"
+                />
+                <small v-if="completionErrors[index]?.environment" class="field-error">{{ completionErrors[index]?.environment }}</small>
+              </label>
+              <label>
+                内网 IP
+                <input
+                  v-model="server.innerIp"
+                  :name="`servers.${index}.innerIp`"
+                  @input="clearCompletionError(index, 'innerIp')"
+                />
+                <small v-if="completionErrors[index]?.innerIp" class="field-error">{{ completionErrors[index]?.innerIp }}</small>
+              </label>
+              <label>
+                外网 IP
+                <input
+                  v-model="server.outerIp"
+                  :name="`servers.${index}.outerIp`"
+                  @input="clearCompletionError(index, 'outerIp')"
+                />
+                <small v-if="completionErrors[index]?.outerIp" class="field-error">{{ completionErrors[index]?.outerIp }}</small>
+              </label>
+              <label>
+                主机名
+                <input
+                  v-model="server.hostname"
+                  :name="`servers.${index}.hostname`"
+                  @input="clearCompletionError(index, 'hostname')"
+                />
+                <small v-if="completionErrors[index]?.hostname" class="field-error">{{ completionErrors[index]?.hostname }}</small>
+              </label>
+              <label>
+                操作系统
+                <input
+                  v-model="server.os"
+                  :name="`servers.${index}.os`"
+                  @input="clearCompletionError(index, 'os')"
+                />
+                <small v-if="completionErrors[index]?.os" class="field-error">{{ completionErrors[index]?.os }}</small>
+              </label>
+              <label>
+                用途
+                <input
+                  v-model="server.purpose"
+                  :name="`servers.${index}.purpose`"
+                  @input="clearCompletionError(index, 'purpose')"
+                />
+                <small v-if="completionErrors[index]?.purpose" class="field-error">{{ completionErrors[index]?.purpose }}</small>
+              </label>
+              <label>
+                部署版本
+                <input
+                  v-model="server.deploymentVersion"
+                  :name="`servers.${index}.deploymentVersion`"
+                  @input="clearCompletionError(index, 'deploymentVersion')"
+                />
+                <small v-if="completionErrors[index]?.deploymentVersion" class="field-error">{{ completionErrors[index]?.deploymentVersion }}</small>
+              </label>
+              <label class="span-2">
+                备注
+                <textarea v-model="server.remark" :name="`servers.${index}.remark`" />
+              </label>
+            </div>
+          </section>
         </div>
         <div v-if="completionSubmitError" class="error-box">{{ completionSubmitError }}</div>
       </form>
@@ -323,8 +402,8 @@ const selectedAssets = ref<ServerAsset[]>([]);
 const assignmentHandlerId = ref<number | null>(null);
 const completionOpen = ref(false);
 const actionLoading = ref(false);
-const completionForm = reactive(createCompletionForm());
-const completionErrors = ref<Partial<Record<keyof DeploymentCompletion, string>>>({});
+const completionServers = ref<DeploymentCompletion[]>([createCompletionForm()]);
+const completionErrors = ref<Partial<Record<keyof DeploymentCompletion, string>>[]>([{}]);
 const form = reactive(createSupportForm());
 const errors = ref<SupportFormErrors>({});
 let projectsRequestId = 0;
@@ -347,6 +426,7 @@ const canComplete = computed(() =>
   selected.value?.status === "部署中" &&
   selected.value.currentHandlerId === auth.profile?.id
 );
+const isAwaitingDeliveryConfirmation = computed(() => selected.value?.status === "待交付确认");
 const deploymentSummary = computed<DeploymentCompletion | null>(() =>
   selected.value?.deploymentResult || selectedAssets.value[0] || null
 );
@@ -425,24 +505,50 @@ function validateCompletion() {
     purpose: "用途",
     deploymentVersion: "部署版本"
   };
-  const next: Partial<Record<keyof DeploymentCompletion, string>> = {};
-  for (const [key, label] of Object.entries(labels) as [keyof typeof labels, string][]) {
-    if (!completionForm[key].trim()) next[key] = `请填写${label}`;
-  }
+  const next = completionServers.value.map((server) => {
+    const rowErrors: Partial<Record<keyof DeploymentCompletion, string>> = {};
+    for (const [key, label] of Object.entries(labels) as [keyof typeof labels, string][]) {
+      if (!server[key]?.trim()) rowErrors[key] = `请填写${label}`;
+    }
+    if (server.innerIp && !isValidIpv4(server.innerIp)) rowErrors.innerIp = "内网 IP 格式不正确";
+    if (server.outerIp && !isValidIpv4(server.outerIp)) rowErrors.outerIp = "外网 IP 格式不正确";
+    return rowErrors;
+  });
   completionErrors.value = next;
-  return Object.keys(next).length === 0;
+  return next.every((rowErrors) => Object.keys(rowErrors).length === 0);
 }
 
-function clearCompletionError(key: keyof DeploymentCompletion) {
-  if (!completionErrors.value[key]) return;
-  const next = { ...completionErrors.value };
-  delete next[key];
+function isValidIpv4(value: string) {
+  const parts = value.trim().split(".");
+  return parts.length === 4 && parts.every((part) => {
+    if (!/^\d+$/.test(part)) return false;
+    const numeric = Number(part);
+    return numeric >= 0 && numeric <= 255 && String(numeric) === part;
+  });
+}
+
+function clearCompletionError(index: number, key: keyof DeploymentCompletion) {
+  const rowErrors = completionErrors.value[index];
+  if (!rowErrors?.[key]) return;
+  const next = completionErrors.value.map((item) => ({ ...item }));
+  delete next[index][key];
   completionErrors.value = next;
+}
+
+function addCompletionServer() {
+  completionServers.value.push(createCompletionForm());
+  completionErrors.value.push({});
+}
+
+function removeCompletionServer(index: number) {
+  if (completionServers.value.length <= 1) return;
+  completionServers.value.splice(index, 1);
+  completionErrors.value.splice(index, 1);
 }
 
 function openCompletion() {
-  Object.assign(completionForm, createCompletionForm());
-  completionErrors.value = {};
+  completionServers.value = [createCompletionForm()];
+  completionErrors.value = [{}];
   completionSubmitError.value = "";
   completionOpen.value = true;
 }
@@ -480,7 +586,9 @@ async function submitCompletion() {
   actionLoading.value = true;
   completionSubmitError.value = "";
   try {
-    await api.completeDeployment(selected.value.id, { ...completionForm });
+    await api.completeDeployment(selected.value.id, {
+      servers: completionServers.value.map((server) => ({ ...server }))
+    });
     completionOpen.value = false;
     await load();
   } catch (error) {
@@ -577,6 +685,18 @@ async function submit() {
 async function handle(nextStatus: string) {
   if (!selected.value) return;
   await api.handleTicket(selected.value.id, { nextStatus });
+  await load();
+}
+
+async function confirmTicket() {
+  if (!selected.value) return;
+  await api.handleTicket(selected.value.id, { nextStatus: "已解决" });
+  await load();
+}
+
+async function transferToDev() {
+  if (!selected.value) return;
+  await api.transferTicket(selected.value.id, { nextStatus: "待研发处理" });
   await load();
 }
 

@@ -4,6 +4,7 @@ import type {
   Credential,
   Customer,
   DeploymentCompletion,
+  DeploymentCompletionInput,
   DeploymentProject,
   PageResult,
   ProductType,
@@ -56,7 +57,7 @@ export const api = {
   assignTicket: (id: number, handlerId: number) =>
     post<SupportTicket>(`/support-tickets/${id}/assign`, { handlerId }),
   selfAssignTicket: (id: number) => post<SupportTicket>(`/support-tickets/${id}/self-assign`),
-  completeDeployment: (id: number, payload: DeploymentCompletion) =>
+  completeDeployment: (id: number, payload: DeploymentCompletion | DeploymentCompletionInput) =>
     post<SupportTicket>(`/support-tickets/${id}/complete-deployment`, payload),
   assets: (ticketId?: number) =>
     get<PageResult<ServerAsset>>(`/assets${ticketId === undefined ? "" : `?ticketId=${ticketId}`}`),

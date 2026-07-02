@@ -4,7 +4,6 @@ from alembic import command
 from alembic.config import Config
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
 
 from backend.app.database import Base
 
@@ -114,7 +113,7 @@ def test_incremental_migration_preserves_baseline_ticket(tmp_path):
         version = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert ticket_no == "SUP-LEGACY-1"
     assert linked_product_id == 1
-    assert version == "0004_deployment_guards"
+    assert version == "0005_multi_server_deployment"
     engine.dispose()
 
 
@@ -133,7 +132,7 @@ def test_existing_create_all_database_can_be_stamped_and_upgraded(tmp_path):
         item["name"] for item in inspector.get_indexes("support_tickets")
     }
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004_deployment_guards"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005_multi_server_deployment"
     engine.dispose()
 
 
@@ -210,7 +209,7 @@ def test_deployment_workflow_migration_preserves_existing_asset(tmp_path):
         ).mappings().one()
         version = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert dict(legacy_asset) == {"project_id": 1, "hostname": "legacy-01", "ticket_id": None}
-    assert version == "0004_deployment_guards"
+    assert version == "0005_multi_server_deployment"
 
     command.downgrade(config, "0002_ticket_products")
     inspector = inspect(engine)
@@ -219,10 +218,10 @@ def test_deployment_workflow_migration_preserves_existing_asset(tmp_path):
     engine.dispose()
 
 
-def test_deployment_guard_migration_deduplicates_assets_and_enforces_uniqueness(tmp_path):
-    database_url = f"sqlite:///{(tmp_path / 'guards.db').as_posix()}"
+def test_multi_server_migration_allows_same_ticket_product_on_multiple_hosts(tmp_path):
+    database_url = f"sqlite:///{(tmp_path / 'multi-server.db').as_posix()}"
     config = alembic_config(database_url)
-    command.upgrade(config, "0003_deployment_workflow")
+    command.upgrade(config, "0004_deployment_guards")
     engine = create_engine(database_url)
 
     with engine.begin() as connection:
@@ -271,45 +270,44 @@ def test_deployment_guard_migration_deduplicates_assets_and_enforces_uniqueness(
                 """
             )
         )
-        for asset_id in (1, 2):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO server_assets (
-                        id, ticket_id, customer_id, project_name, product_type_id, deployed_by_id,
-                        environment, inner_ip, outer_ip, hostname, os, purpose,
-                        deployment_version, remark, created_at, updated_at
-                    ) VALUES (
-                        :asset_id, 1, 1, '防重项目', 1, 1,
-                        '生产', '10.0.0.1', '', 'guard-01', 'Linux', '应用',
-                        'v1', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    )
-                    """
-                ),
-                {"asset_id": asset_id},
+        connection.execute(
+            text(
+                """
+                INSERT INTO server_assets (
+                    id, ticket_id, customer_id, project_name, product_type_id, deployed_by_id,
+                    environment, inner_ip, outer_ip, hostname, os, purpose,
+                    deployment_version, remark, created_at, updated_at
+                ) VALUES (
+                    1, 1, 1, '多服务器项目', 1, 1,
+                    '生产', '10.0.0.1', '', 'app-01', 'Linux', '应用',
+                    'v1', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                """
             )
+        )
 
     command.upgrade(config, "head")
 
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT COUNT(*) FROM server_assets")) == 1
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004_deployment_guards"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005_multi_server_deployment"
 
-    with pytest.raises(IntegrityError):
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO server_assets (
-                        ticket_id, customer_id, project_name, product_type_id, deployed_by_id,
-                        environment, inner_ip, outer_ip, hostname, os, purpose,
-                        deployment_version, remark, created_at, updated_at
-                    ) VALUES (
-                        1, 1, '防重项目', 1, 1,
-                        '生产', '10.0.0.2', '', 'guard-02', 'Linux', '应用',
-                        'v1', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    )
-                    """
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO server_assets (
+                    ticket_id, customer_id, project_name, product_type_id, deployed_by_id,
+                    environment, inner_ip, outer_ip, hostname, os, purpose,
+                    deployment_version, remark, created_at, updated_at
+                ) VALUES (
+                    1, 1, '多服务器项目', 1, 1,
+                    '生产', '10.0.0.2', '', 'app-02', 'Linux', '应用',
+                    'v1', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
+                """
             )
+        )
+
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT COUNT(*) FROM server_assets WHERE ticket_id = 1")) == 2
     engine.dispose()

@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from ipaddress import ip_address
 from uuid import uuid4
 
 import jwt
@@ -230,6 +231,45 @@ def require_ticket_status(ticket: models.SupportTicket, allowed: set[str], actio
         raise HTTPException(status_code=409, detail=f"当前状态“{ticket.status}”不允许{action_name}")
 
 
+def normalize_deployment_servers(payload: schemas.DeploymentCompletion) -> list[schemas.DeploymentServerInfo]:
+    servers = payload.servers or [
+        schemas.DeploymentServerInfo(
+            environment=payload.environment,
+            inner_ip=payload.inner_ip,
+            outer_ip=payload.outer_ip,
+            hostname=payload.hostname,
+            os=payload.os,
+            purpose=payload.purpose,
+            deployment_version=payload.deployment_version,
+            remark=payload.remark,
+        )
+    ]
+    if not servers:
+        raise HTTPException(status_code=422, detail="请至少填写一台服务器信息")
+
+    required_labels: list[tuple[str, str]] = [
+        ("environment", "环境类型"),
+        ("inner_ip", "内网 IP"),
+        ("hostname", "主机名"),
+        ("os", "操作系统"),
+        ("purpose", "用途"),
+        ("deployment_version", "部署版本"),
+    ]
+    for index, server in enumerate(servers, start=1):
+        for field_name, label in required_labels:
+            if not getattr(server, field_name).strip():
+                raise HTTPException(status_code=422, detail=f"第{index}台服务器请填写{label}")
+        for field_name, label in [("inner_ip", "内网 IP"), ("outer_ip", "外网 IP")]:
+            value = getattr(server, field_name).strip()
+            if not value:
+                continue
+            try:
+                ip_address(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"第{index}台服务器{label}格式不正确") from exc
+    return servers
+
+
 def commit_ticket(db: Session, ticket: models.SupportTicket) -> dict:
     try:
         db.commit()
@@ -353,7 +393,7 @@ def default_status(support_type: str) -> str:
 
 
 @app.get("/api/health")
-def health():
+async def health():
     return ok({"status": "ok"})
 
 
@@ -740,25 +780,27 @@ def complete_deployment(
         raise HTTPException(status_code=403, detail="仅当前部署负责人可以完成部署")
 
     products = ticket_products(ticket)
-    for product in products:
-        db.add(
-            models.ServerAsset(
-                project_id=None,
-                ticket_id=ticket.id,
-                customer_id=ticket.customer_id,
-                project_name=ticket.project_name,
-                product_type_id=product.id,
-                deployed_by_id=current_user.id,
-                environment=payload.environment,
-                inner_ip=payload.inner_ip,
-                outer_ip=payload.outer_ip,
-                hostname=payload.hostname,
-                os=payload.os,
-                purpose=payload.purpose,
-                deployment_version=payload.deployment_version,
-                remark=payload.remark,
+    servers = normalize_deployment_servers(payload)
+    for server in servers:
+        for product in products:
+            db.add(
+                models.ServerAsset(
+                    project_id=None,
+                    ticket_id=ticket.id,
+                    customer_id=ticket.customer_id,
+                    project_name=ticket.project_name,
+                    product_type_id=product.id,
+                    deployed_by_id=current_user.id,
+                    environment=server.environment,
+                    inner_ip=server.inner_ip,
+                    outer_ip=server.outer_ip,
+                    hostname=server.hostname,
+                    os=server.os,
+                    purpose=server.purpose,
+                    deployment_version=server.deployment_version,
+                    remark=server.remark,
+                )
             )
-        )
     ticket.status = "已部署"
     ticket.deployed_by_id = current_user.id
     ticket.deployed_at = models.now_utc()

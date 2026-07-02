@@ -12,6 +12,7 @@ const apiMock = vi.hoisted(() => ({
   deploymentProjects: vi.fn(),
   createTicket: vi.fn(),
   handleTicket: vi.fn(),
+  transferTicket: vi.fn(),
   closeTicket: vi.fn(),
   users: vi.fn(),
   receiveTicket: vi.fn(),
@@ -120,6 +121,7 @@ beforeEach(() => {
     pageSize: 20,
     total: 1
   });
+  apiMock.transferTicket.mockResolvedValue({});
   apiMock.receiveTicket.mockResolvedValue({});
   apiMock.assignTicket.mockResolvedValue({});
   apiMock.selfAssignTicket.mockResolvedValue({});
@@ -221,6 +223,34 @@ describe("existing project support form", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("项目选项加载失败");
+  });
+});
+
+describe("delivery confirmation actions", () => {
+  it("shows confirm and transfer-to-dev actions instead of generic processing", async () => {
+    const wrapper = await mountPage("技术支持", {
+      tickets: [deploymentTicket({
+        supportType: "技术支持",
+        title: "登录异常",
+        status: "待交付确认",
+        currentHandlerId: baseProfile.id,
+        currentHandlerName: baseProfile.name
+      })],
+      openCreate: false
+    });
+    const actions = wrapper.find(".detail-side .button-row");
+
+    expect(actions.text()).toContain("确认完成");
+    expect(actions.text()).toContain("转研发");
+    expect(actions.text()).not.toContain("处理");
+
+    await actions.find('[data-test="confirm-ticket"]').trigger("click");
+    await flushPromises();
+    expect(apiMock.handleTicket).toHaveBeenCalledWith(101, { nextStatus: "已解决" });
+
+    await actions.find('[data-test="transfer-to-dev"]').trigger("click");
+    await flushPromises();
+    expect(apiMock.transferTicket).toHaveBeenCalledWith(101, { nextStatus: "待研发处理" });
   });
 });
 
@@ -344,26 +374,28 @@ describe("deployment lifecycle actions", () => {
     expect(wrapper.text()).toContain("请填写用途");
     expect(wrapper.text()).toContain("请填写部署版本");
 
-    await wrapper.get('[name="environment"]').setValue("生产");
-    await wrapper.get('[name="innerIp"]').setValue("10.20.30.40");
-    await wrapper.get('[name="hostname"]').setValue("prod-app-01");
-    await wrapper.get('[name="os"]').setValue("Rocky Linux 9");
-    await wrapper.get('[name="purpose"]').setValue("应用服务");
-    await wrapper.get('[name="deploymentVersion"]').setValue("v2.8.1");
-    await wrapper.get('[name="outerIp"]').setValue("203.0.113.10");
-    await wrapper.get('[name="remark"]').setValue("自动化验收");
+    await wrapper.get('[name="servers.0.environment"]').setValue("生产");
+    await wrapper.get('[name="servers.0.innerIp"]').setValue("10.20.30.40");
+    await wrapper.get('[name="servers.0.hostname"]').setValue("prod-app-01");
+    await wrapper.get('[name="servers.0.os"]').setValue("Rocky Linux 9");
+    await wrapper.get('[name="servers.0.purpose"]').setValue("应用服务");
+    await wrapper.get('[name="servers.0.deploymentVersion"]').setValue("v2.8.1");
+    await wrapper.get('[name="servers.0.outerIp"]').setValue("203.0.113.10");
+    await wrapper.get('[name="servers.0.remark"]').setValue("自动化验收");
     await wrapper.get('[data-test="confirm-complete-deployment"]').trigger("click");
     await flushPromises();
 
     expect(apiMock.completeDeployment).toHaveBeenCalledWith(assignedTicket.id, {
-      environment: "生产",
-      innerIp: "10.20.30.40",
-      outerIp: "203.0.113.10",
-      hostname: "prod-app-01",
-      os: "Rocky Linux 9",
-      purpose: "应用服务",
-      deploymentVersion: "v2.8.1",
-      remark: "自动化验收"
+      servers: [{
+        environment: "生产",
+        innerIp: "10.20.30.40",
+        outerIp: "203.0.113.10",
+        hostname: "prod-app-01",
+        os: "Rocky Linux 9",
+        purpose: "应用服务",
+        deploymentVersion: "v2.8.1",
+        remark: "自动化验收"
+      }]
     });
 
     const nonHandler = await mountPage("项目部署", {
@@ -373,6 +405,66 @@ describe("deployment lifecycle actions", () => {
     });
     expect(nonHandler.find('[data-test="complete-deployment"]').exists()).toBe(false);
     expect(nonHandler.find('[data-test="reassign-deployment"]').exists()).toBe(true);
+  });
+
+  it("submits deployment completion with multiple server rows", async () => {
+    const assignedTicket = deploymentTicket({
+      status: "部署中",
+      currentHandlerId: engineerProfile.id,
+      currentHandlerName: engineerProfile.name,
+      receivedById: leaderProfile.id,
+      receivedByName: leaderProfile.name
+    });
+    const wrapper = await mountPage("项目部署", {
+      profile: engineerProfile,
+      tickets: [assignedTicket],
+      openCreate: false
+    });
+
+    await wrapper.get('[data-test="complete-deployment"]').trigger("click");
+    await wrapper.get('[data-test="add-server"]').trigger("click");
+
+    const serverRows = wrapper.findAll(".server-entry");
+    expect(serverRows).toHaveLength(2);
+
+    const values = [
+      {
+        environment: "生产",
+        innerIp: "10.20.30.40",
+        outerIp: "203.0.113.10",
+        hostname: "prod-app-01",
+        os: "Rocky Linux 9",
+        purpose: "应用服务",
+        deploymentVersion: "v2.8.1",
+        remark: "应用节点"
+      },
+      {
+        environment: "生产",
+        innerIp: "10.20.30.41",
+        outerIp: "",
+        hostname: "prod-worker-01",
+        os: "Rocky Linux 9",
+        purpose: "任务服务",
+        deploymentVersion: "v2.8.1",
+        remark: "任务节点"
+      }
+    ];
+
+    for (const [index, value] of values.entries()) {
+      await wrapper.get(`[name="servers.${index}.environment"]`).setValue(value.environment);
+      await wrapper.get(`[name="servers.${index}.innerIp"]`).setValue(value.innerIp);
+      await wrapper.get(`[name="servers.${index}.outerIp"]`).setValue(value.outerIp);
+      await wrapper.get(`[name="servers.${index}.hostname"]`).setValue(value.hostname);
+      await wrapper.get(`[name="servers.${index}.os"]`).setValue(value.os);
+      await wrapper.get(`[name="servers.${index}.purpose"]`).setValue(value.purpose);
+      await wrapper.get(`[name="servers.${index}.deploymentVersion"]`).setValue(value.deploymentVersion);
+      await wrapper.get(`[name="servers.${index}.remark"]`).setValue(value.remark);
+    }
+
+    await wrapper.get('[data-test="confirm-complete-deployment"]').trigger("click");
+    await flushPromises();
+
+    expect(apiMock.completeDeployment).toHaveBeenCalledWith(assignedTicket.id, { servers: values });
   });
 
   it("renders the deployer and environment summary for a completed deployment", async () => {

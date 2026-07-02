@@ -125,7 +125,6 @@ class ProjectUpdateLog(Base):
 class ServerAsset(Base, TimestampMixin):
     __tablename__ = "server_assets"
     __table_args__ = (
-        UniqueConstraint("ticket_id", "product_type_id", name="uq_server_asset_ticket_product"),
         Index("ix_server_assets_ticket_id", "ticket_id"),
         Index("ix_server_assets_customer_project", "customer_id", "project_name"),
     )

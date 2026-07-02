@@ -93,6 +93,10 @@ export interface DeploymentCompletion {
   remark?: string;
 }
 
+export interface DeploymentCompletionInput {
+  servers: DeploymentCompletion[];
+}
+
 export interface ServerAsset extends DeploymentCompletion {
   id: number;
   projectId?: number | null;

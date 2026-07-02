@@ -23,6 +23,13 @@ export class ApiError extends Error {
   }
 }
 
+function errorMessage(payload: unknown, fallback: string) {
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) return "请求参数不完整，请检查表单填写内容";
+  return fallback;
+}
+
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");
@@ -37,7 +44,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     payload = {};
   }
   if (!response.ok) {
-    throw new ApiError((payload as { detail?: string }).detail || response.statusText, response.status);
+    throw new ApiError(errorMessage(payload, response.statusText), response.status);
   }
   const apiPayload = payload as ApiResponse<T>;
   if (apiPayload.code !== 0) {

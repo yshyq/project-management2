@@ -1,7 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from backend.app import models
@@ -51,6 +50,15 @@ def completion_payload(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def multi_server_completion_payload() -> dict:
+    return {
+        "servers": [
+            completion_payload(hostname="prod-app-01", innerIp="10.20.30.40", purpose="应用服务"),
+            completion_payload(hostname="prod-worker-01", innerIp="10.20.30.41", purpose="任务服务"),
+        ]
+    }
 
 
 def test_seed_idempotently_adds_workflow_accounts(test_engine):
@@ -177,6 +185,52 @@ def test_zhangsan_can_self_assign_and_complete(api: TestClient):
     )
     assert completed.status_code == 200
     assert completed.json()["data"]["deployedByName"] == "张三"
+
+
+def test_completion_accepts_multiple_servers_and_creates_assets_per_product_and_server(api: TestClient):
+    ticket = create_deployment(api, project_name="多服务器部署项目", product_ids=[1, 2])
+    zhangsan = auth_headers(api, "zhangsan")
+
+    assert api.post(f"/api/support-tickets/{ticket['id']}/receive", headers=zhangsan).status_code == 200
+    assert api.post(f"/api/support-tickets/{ticket['id']}/self-assign", headers=zhangsan).status_code == 200
+
+    completed = api.post(
+        f"/api/support-tickets/{ticket['id']}/complete-deployment",
+        json=multi_server_completion_payload(),
+        headers=zhangsan,
+    )
+    assert completed.status_code == 200
+    assert completed.json()["data"]["status"] == "已部署"
+
+    assets = api.get(f"/api/assets?ticketId={ticket['id']}", headers=zhangsan)
+    assert assets.status_code == 200
+    asset_page = assets.json()["data"]
+    assert asset_page["total"] == 4
+    assert {
+        (asset["productName"], asset["hostname"], asset["innerIp"], asset["purpose"])
+        for asset in asset_page["list"]
+    } == {
+        ("edhr", "prod-app-01", "10.20.30.40", "应用服务"),
+        ("edhr MAX", "prod-app-01", "10.20.30.40", "应用服务"),
+        ("edhr", "prod-worker-01", "10.20.30.41", "任务服务"),
+        ("edhr MAX", "prod-worker-01", "10.20.30.41", "任务服务"),
+    }
+
+
+def test_completion_validation_errors_are_chinese_and_identify_server_row(api: TestClient):
+    ticket = create_deployment(api, project_name="中文校验项目", product_ids=[1])
+    zhangsan = auth_headers(api, "zhangsan")
+
+    assert api.post(f"/api/support-tickets/{ticket['id']}/receive", headers=zhangsan).status_code == 200
+    assert api.post(f"/api/support-tickets/{ticket['id']}/self-assign", headers=zhangsan).status_code == 200
+
+    invalid = api.post(
+        f"/api/support-tickets/{ticket['id']}/complete-deployment",
+        json={"servers": [completion_payload(hostname="", innerIp="not-an-ip")]},
+        headers=zhangsan,
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"] == "第1台服务器请填写主机名"
 
 
 def test_deployment_actions_enforce_roles_ownership_and_state_order(api: TestClient):
@@ -384,7 +438,7 @@ def test_user_and_role_management_is_admin_only_and_ops_listing_is_enabled_only(
     assert "lisi" not in {item["username"] for item in ops_users.json()["data"]["list"]}
 
 
-def test_server_assets_reject_duplicate_ticket_product(test_engine):
+def test_server_assets_allow_multiple_servers_for_same_ticket_product(test_engine):
     models.Base.metadata.create_all(bind=test_engine)
     with Session(test_engine) as db:
         seed(db)
@@ -411,6 +465,9 @@ def test_server_assets_reject_duplicate_ticket_product(test_engine):
         }
         db.add(models.ServerAsset(**asset_data))
         db.commit()
-        db.add(models.ServerAsset(**asset_data))
-        with pytest.raises(IntegrityError):
-            db.commit()
+        db.add(models.ServerAsset(**{**asset_data, "inner_ip": "10.0.0.2", "hostname": "asset-02"}))
+        db.commit()
+
+        assert db.scalar(
+            select(func.count(models.ServerAsset.id)).where(models.ServerAsset.ticket_id == ticket.id)
+        ) == 2

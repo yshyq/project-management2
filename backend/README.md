@@ -21,6 +21,12 @@ $env:DATABASE_URL="sqlite:///./backend/dev.db"
 & "C:\Users\EDY\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+后端单独调试或 Docker Compose 默认使用 `8000`。如果要配合 `frontend/vite.config.mjs` 的本地代理运行前端，请把后端端口改为 `8001`：
+
+```powershell
+& "C:\Users\EDY\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8001
+```
+
 默认账号：
 
 | 用户名 | 密码 | 角色 |
