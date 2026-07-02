@@ -44,6 +44,24 @@ def test_login_returns_profile_and_menu_permissions(api: TestClient):
     assert "credentials" in menus.json()["data"]
 
 
+def test_collaborative_support_menus_are_available_to_every_user(api: TestClient):
+    headers = auth_headers(api, "delivery", "user123")
+    profile = api.get("/api/auth/profile", headers=headers)
+    menus = api.get("/api/auth/menus", headers=headers)
+    support_menu_keys = {
+        "customerInfo",
+        "supportDeploy",
+        "supportTech",
+        "supportNeed",
+        "supportOther",
+    }
+
+    assert profile.status_code == 200
+    assert menus.status_code == 200
+    assert support_menu_keys <= set(profile.json()["data"]["menus"])
+    assert support_menu_keys <= set(menus.json()["data"])
+
+
 def test_customer_and_project_can_be_created_and_listed(api: TestClient):
     headers = auth_headers(api)
 
@@ -104,6 +122,128 @@ def test_support_ticket_creation_sets_default_workflow_status_and_handler(api: T
     assert ticket["status"] == "待运维接收"
     assert ticket["currentHandlerName"] == "陈运维"
     assert ticket["deploymentExtra"]["remoteMethod"] == "堡垒机 / SSH"
+
+
+def test_support_ticket_list_supports_pagination(api: TestClient):
+    headers = auth_headers(api, "delivery", "user123")
+    for index in range(3):
+        assert create_deployment(
+            api,
+            headers,
+            project_name=f"分页项目{index}",
+            product_ids=[1],
+        ).status_code == 200
+
+    response = api.get(
+        "/api/support-tickets?supportType=项目部署&keyword=分页项目&pageNo=2&pageSize=1",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["page"] == 2
+    assert data["pageSize"] == 1
+    assert data["total"] == 3
+    assert [item["projectName"] for item in data["list"]] == ["分页项目1"]
+
+
+def test_support_ticket_list_filters_to_related_tickets_unless_role_has_all_support_scope(api: TestClient):
+    wanger_headers = auth_headers(api, "wanger", "user123")
+    delivery_headers = auth_headers(api, "delivery", "user123")
+    admin_headers = auth_headers(api)
+    ops_headers = auth_headers(api, "ops", "user123")
+
+    assert create_deployment(
+        api,
+        wanger_headers,
+        project_name="权限范围-王二相关",
+        product_ids=[1],
+    ).status_code == 200
+    assert create_deployment(
+        api,
+        delivery_headers,
+        project_name="权限范围-李交付相关",
+        product_ids=[1],
+    ).status_code == 200
+
+    wanger_page = api.get(
+        "/api/support-tickets?supportType=项目部署&keyword=权限范围&pageNo=1&pageSize=20",
+        headers=wanger_headers,
+    )
+    admin_page = api.get(
+        "/api/support-tickets?supportType=项目部署&keyword=权限范围&pageNo=1&pageSize=20",
+        headers=admin_headers,
+    )
+    ops_page = api.get(
+        "/api/support-tickets?supportType=项目部署&keyword=权限范围&pageNo=1&pageSize=20",
+        headers=ops_headers,
+    )
+
+    assert wanger_page.status_code == 200
+    assert wanger_page.json()["data"]["total"] == 1
+    assert [item["projectName"] for item in wanger_page.json()["data"]["list"]] == ["权限范围-王二相关"]
+    assert admin_page.json()["data"]["total"] == 2
+    assert ops_page.json()["data"]["total"] == 2
+
+
+def test_support_ticket_detail_requires_related_ticket_or_all_support_scope(api: TestClient):
+    wanger_headers = auth_headers(api, "wanger", "user123")
+    delivery_headers = auth_headers(api, "delivery", "user123")
+    admin_headers = auth_headers(api)
+    own_ticket = create_deployment(
+        api,
+        wanger_headers,
+        project_name="详情权限-王二相关",
+        product_ids=[1],
+    ).json()["data"]
+    other_ticket = create_deployment(
+        api,
+        delivery_headers,
+        project_name="详情权限-李交付相关",
+        product_ids=[1],
+    ).json()["data"]
+
+    own_detail = api.get(f"/api/support-tickets/{own_ticket['id']}", headers=wanger_headers)
+    unrelated_detail = api.get(f"/api/support-tickets/{other_ticket['id']}", headers=wanger_headers)
+    admin_detail = api.get(f"/api/support-tickets/{other_ticket['id']}", headers=admin_headers)
+
+    assert own_detail.status_code == 200
+    assert unrelated_detail.status_code == 403
+    assert unrelated_detail.json()["detail"] == "仅可查看与自己相关的支持单"
+    assert admin_detail.status_code == 200
+
+
+def test_system_admin_can_run_deployment_workflow_actions(api: TestClient):
+    wanger_headers = auth_headers(api, "wanger", "user123")
+    admin_headers = auth_headers(api)
+    ticket = create_deployment(
+        api,
+        wanger_headers,
+        project_name="超级管理员部署权限",
+        product_ids=[1],
+    ).json()["data"]
+
+    received = api.post(f"/api/support-tickets/{ticket['id']}/receive", headers=admin_headers)
+    self_assigned = api.post(f"/api/support-tickets/{ticket['id']}/self-assign", headers=admin_headers)
+    completed = api.post(
+        f"/api/support-tickets/{ticket['id']}/complete-deployment",
+        json={
+            "environment": "生产",
+            "innerIp": "10.20.30.50",
+            "outerIp": "",
+            "hostname": "admin-complete-01",
+            "os": "Rocky Linux 9",
+            "purpose": "应用服务",
+            "deploymentVersion": "v2.8.1",
+            "remark": "系统管理员完成部署",
+        },
+        headers=admin_headers,
+    )
+
+    assert received.status_code == 200
+    assert self_assigned.status_code == 200
+    assert completed.status_code == 200
+    assert completed.json()["data"]["status"] == "已部署"
 
 
 def test_deployment_can_create_and_update_multiple_products(api: TestClient):

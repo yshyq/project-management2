@@ -38,7 +38,7 @@ describe("support request form rules", () => {
 
   it("selects a customer-scoped project and clears product", () => {
     const form = createSupportForm();
-    form.customerId = 3;
+    form.customerId = 1;
     form.productId = 11;
 
     selectDeploymentProject(form, {
@@ -67,7 +67,6 @@ describe("support request form rules", () => {
     const form = createSupportForm();
 
     expect(validateSupportForm(form, false)).toEqual({
-      customerId: "请选择客户",
       projectName: "请选择已部署项目",
       productId: "请选择该项目已部署的产品",
       title: "请填写标题"

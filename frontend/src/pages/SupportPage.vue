@@ -1,8 +1,8 @@
 <template>
   <section class="support-page">
     <div class="filter-bar">
-      <label>关键字<input v-model="keyword" placeholder="标题、项目、说明" @keyup.enter="load" /></label>
-      <button class="secondary-button" type="button" @click="load">查询</button>
+      <label>关键字<input v-model="keyword" placeholder="标题、项目、说明" @keyup.enter="search" /></label>
+      <button class="secondary-button" type="button" @click="search">查询</button>
       <button class="primary-button" type="button" @click="openCreate">新建{{ supportType }}</button>
     </div>
     <div v-if="listError" class="error-box page-message">{{ listError }}</div>
@@ -13,13 +13,37 @@
           <template #priority="{ row }"><StatusBadge :text="String(row.priority)" /></template>
           <template #status="{ row }"><StatusBadge :text="String(row.status)" /></template>
         </DataTable>
+        <div class="support-pagination">
+          <span>共 {{ total }} 条</span>
+          <div class="pager-controls">
+            <button
+              class="secondary-button"
+              data-test="prev-page"
+              type="button"
+              :disabled="loading || pageNo <= 1"
+              @click="goToPage(pageNo - 1)"
+            >
+              上一页
+            </button>
+            <span>第 {{ pageNo }} / {{ totalPages }} 页</span>
+            <button
+              class="secondary-button"
+              data-test="next-page"
+              type="button"
+              :disabled="loading || pageNo >= totalPages"
+              @click="goToPage(pageNo + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
       </section>
       <aside class="panel detail-side">
         <template v-if="selected">
-          <div class="panel-head"><h2>{{ selected.title }}</h2><StatusBadge :text="selected.status" /></div>
+          <div class="panel-head"><h2>{{ selectedHeading }}</h2><StatusBadge :text="selected.status" /></div>
           <div class="meta-grid">
-            <div><span>客户</span><strong>{{ selected.customerName }}</strong></div>
-            <div><span>项目</span><strong>{{ selected.projectName }}</strong></div>
+            <div><span>项目名称</span><strong>{{ selected.projectName }}</strong></div>
+            <div v-if="isDeployment"><span>客户</span><strong>{{ selected.customerName }}</strong></div>
             <div><span>产品</span><strong>{{ productDisplayNames(selected) }}</strong></div>
             <div><span>当前处理人</span><strong>{{ selected.currentHandlerName || "待分派" }}</strong></div>
             <div><span>发起人</span><strong>{{ selected.requesterName }}</strong></div>
@@ -136,7 +160,7 @@
     <AppModal :open="modalOpen" :title="`新建${supportType}`" @close="modalOpen = false">
       <form id="support-ticket-form" novalidate @submit.prevent="submit">
         <div class="form-grid">
-          <label>
+          <label v-if="isDeployment">
             客户
             <select name="customerId" required :value="form.customerId ?? ''" @change="onCustomerChange">
               <option value="">请选择客户</option>
@@ -163,19 +187,19 @@
             <select
               name="projectName"
               required
-              :disabled="!form.customerId || projectsLoading"
-              :value="form.projectName"
+              :disabled="projectsLoading"
+              :value="selectedDeploymentProjectValue"
               @change="onProjectChange"
             >
               <option value="">{{ projectsLoading ? "正在加载项目..." : "请选择已部署项目" }}</option>
-              <option v-for="item in deploymentProjects" :key="item.projectName" :value="item.projectName">
-                {{ item.projectName }}
+              <option v-for="item in deploymentProjects" :key="deploymentProjectValue(item)" :value="deploymentProjectValue(item)">
+                {{ deploymentProjectLabel(item) }}
               </option>
             </select>
             <small v-if="errors.projectName" class="field-error">{{ errors.projectName }}</small>
-            <small v-else-if="projectsLoading" class="field-hint">正在加载该客户的部署项目...</small>
+            <small v-else-if="projectsLoading" class="field-hint">正在加载已部署项目...</small>
             <small v-else-if="projectsError" class="field-error">{{ projectsError }}</small>
-            <small v-else-if="form.customerId && !deploymentProjects.length" class="field-hint">该客户暂无已部署项目</small>
+            <small v-else-if="!deploymentProjects.length" class="field-hint">暂无已部署项目</small>
           </label>
 
           <fieldset v-if="isDeployment" class="form-field span-2">
@@ -384,6 +408,9 @@ const props = defineProps<{ supportType: string }>();
 const auth = useAuthStore();
 const keyword = ref("");
 const loading = ref(false);
+const pageNo = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
 const submitting = ref(false);
 const modalOpen = ref(false);
 const listError = ref("");
@@ -430,17 +457,40 @@ const isAwaitingDeliveryConfirmation = computed(() => selected.value?.status ===
 const deploymentSummary = computed<DeploymentCompletion | null>(() =>
   selected.value?.deploymentResult || selectedAssets.value[0] || null
 );
-const selectedProject = computed(() => deploymentProjects.value.find((item) => item.projectName === form.projectName));
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
+const selectedHeading = computed(() => selected.value
+  ? isDeployment.value ? selected.value.projectName : selected.value.title
+  : ""
+);
+const selectedProject = computed(() => deploymentProjects.value.find((item) =>
+  item.projectName === form.projectName && item.customerId === form.customerId
+) || null);
+const selectedDeploymentProjectValue = computed(() => selectedProject.value ? deploymentProjectValue(selectedProject.value) : "");
 const projectProducts = computed(() => selectedProject.value?.products || []);
-const columns = [
-  { key: "ticketNo", label: "编号", width: "130px" },
-  { key: "title", label: "标题", width: "minmax(220px,1fr)" },
-  { key: "customerName", label: "客户", width: "150px" },
-  { key: "productName", label: "产品", width: "160px" },
-  { key: "priority", label: "优先级", width: "90px" },
-  { key: "currentHandlerName", label: "处理人", width: "110px" },
-  { key: "status", label: "状态", width: "110px" }
-];
+const projectNameCounts = computed(() => deploymentProjects.value.reduce<Record<string, number>>((counts, item) => {
+  counts[item.projectName] = (counts[item.projectName] || 0) + 1;
+  return counts;
+}, {}));
+const columns = computed(() => {
+  const list = [
+    { key: "ticketNo", label: "编号", width: "130px" }
+  ];
+  if (isDeployment.value) {
+    list.push({ key: "projectName", label: "项目名称", width: "minmax(220px,1fr)" });
+  } else {
+    list.push(
+      { key: "title", label: "标题", width: "minmax(200px,1fr)" },
+      { key: "projectName", label: "项目名称", width: "150px" }
+    );
+  }
+  list.push(
+    { key: "productName", label: "产品", width: "160px" },
+    { key: "priority", label: "优先级", width: "90px" },
+    { key: "currentHandlerName", label: "处理人", width: "110px" },
+    { key: "status", label: "状态", width: "110px" }
+  );
+  return list;
+});
 
 async function load() {
   loading.value = true;
@@ -451,11 +501,14 @@ async function load() {
     : Promise.resolve({ list: [] as ProductType[], page: 1, pageSize: 20, total: 0 });
   try {
     const [ticketPage, customerPage, productPage] = await Promise.all([
-      api.tickets(props.supportType, keyword.value),
+      api.tickets(props.supportType, keyword.value, pageNo.value, pageSize.value),
       customersPromise,
       productsPromise
     ]);
     tickets.value = ticketPage.list;
+    pageNo.value = ticketPage.page;
+    pageSize.value = ticketPage.pageSize;
+    total.value = ticketPage.total;
     customers.value = customerPage.list;
     products.value = productPage.list;
     selected.value = tickets.value[0] || null;
@@ -471,6 +524,17 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+async function search() {
+  pageNo.value = 1;
+  await load();
+}
+
+async function goToPage(nextPage: number) {
+  if (nextPage < 1 || nextPage > totalPages.value || nextPage === pageNo.value) return;
+  pageNo.value = nextPage;
+  await load();
 }
 
 async function loadSelectedAssets() {
@@ -605,13 +669,14 @@ async function selectTicket(row: Record<string, unknown>) {
   await loadSelectedAssets();
 }
 
-function openCreate() {
+async function openCreate() {
   Object.assign(form, createSupportForm());
   deploymentProjects.value = [];
   errors.value = {};
   projectsError.value = "";
   submitError.value = "";
   modalOpen.value = true;
+  if (!isDeployment.value) await loadDeploymentProjects();
 }
 
 async function onCustomerChange(event: Event) {
@@ -624,17 +689,19 @@ async function onCustomerChange(event: Event) {
   if (!isDeployment.value && customerId) await loadDeploymentProjects(customerId);
 }
 
-async function loadDeploymentProjects(customerId: number) {
+async function loadDeploymentProjects(customerId?: number) {
   const requestId = ++projectsRequestId;
   projectsLoading.value = true;
   projectsError.value = "";
   try {
-    const rows = await api.deploymentProjects(customerId);
-    if (requestId === projectsRequestId && form.customerId === customerId) {
+    const rows = customerId === undefined
+      ? await api.deploymentProjects()
+      : await api.deploymentProjects(customerId);
+    if (requestId === projectsRequestId && (customerId === undefined || form.customerId === customerId)) {
       deploymentProjects.value = rows;
     }
   } catch (error) {
-    if (requestId === projectsRequestId && form.customerId === customerId) {
+    if (requestId === projectsRequestId && (customerId === undefined || form.customerId === customerId)) {
       deploymentProjects.value = [];
       projectsError.value = error instanceof Error ? error.message : "部署项目加载失败，请稍后重试";
     }
@@ -643,9 +710,19 @@ async function loadDeploymentProjects(customerId: number) {
   }
 }
 
+function deploymentProjectValue(project: DeploymentProject) {
+  return `${project.customerId}::${project.projectName}`;
+}
+
+function deploymentProjectLabel(project: DeploymentProject) {
+  return projectNameCounts.value[project.projectName] > 1
+    ? `${project.projectName}（${project.customerName}）`
+    : project.projectName;
+}
+
 function onProjectChange(event: Event) {
-  const projectName = (event.target as HTMLSelectElement).value;
-  const project = deploymentProjects.value.find((item) => item.projectName === projectName) || null;
+  const projectValue = (event.target as HTMLSelectElement).value;
+  const project = deploymentProjects.value.find((item) => deploymentProjectValue(item) === projectValue) || null;
   selectDeploymentProject(form, project);
   clearError("projectName");
   clearError("productId");
@@ -674,6 +751,7 @@ async function submit() {
   try {
     await api.createTicket(buildSupportTicketPayload(form, props.supportType));
     modalOpen.value = false;
+    pageNo.value = 1;
     await load();
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : "提交失败，请稍后重试";
@@ -708,6 +786,9 @@ async function closeTicket() {
 
 watch(() => props.supportType, () => {
   modalOpen.value = false;
+  pageNo.value = 1;
+  total.value = 0;
+  deploymentProjects.value = [];
   load();
 });
 onMounted(load);

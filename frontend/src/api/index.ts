@@ -46,10 +46,12 @@ export const api = {
   projectVersions: (id: number) => get<PageResult<{ id: number; serviceName: string; version: string; remark: string }>>(`/projects/${id}/versions`),
   projectUpdates: (id: number) => get<PageResult<{ id: number; version: string; content: string; updatedAt: string }>>(`/projects/${id}/updates`),
   projectDashboard: (id: number) => get<{ ticketTotal: number; processingTotal: number; closedTotal: number; byType: Record<string, number> }>(`/projects/${id}/dashboard`),
-  tickets: (supportType = "", keyword = "") => {
+  tickets: (supportType = "", keyword = "", pageNo = 1, pageSize = 20) => {
     const params = new URLSearchParams();
     if (supportType) params.set("supportType", supportType);
     if (keyword) params.set("keyword", keyword);
+    params.set("pageNo", String(pageNo));
+    params.set("pageSize", String(pageSize));
     return get<PageResult<SupportTicket>>(`/support-tickets${params.size ? `?${params}` : ""}`);
   },
   createTicket: (payload: SupportTicketCreateInput) => post<SupportTicket>("/support-tickets", payload),

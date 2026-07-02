@@ -46,6 +46,54 @@ def split_csv(value: str) -> list[str]:
     return [item for item in value.split(",") if item]
 
 
+SUPPORT_MENU_KEYS = ["customerInfo", "supportDeploy", "supportTech", "supportNeed", "supportOther"]
+SUPER_ADMIN_ROLE_NAMES = {"系统管理员", "超级管理员"}
+ALL_SUPPORT_DATA_SCOPES = {"全部数据", "全部运维项目"}
+
+
+def effective_menus(user: models.User) -> list[str]:
+    menus = split_csv(user.role.menus)
+    for key in SUPPORT_MENU_KEYS:
+        if key not in menus:
+            menus.append(key)
+    return menus
+
+
+def is_super_admin(user: models.User) -> bool:
+    return user.role.name in SUPER_ADMIN_ROLE_NAMES or user.role.data_scope == "全部数据"
+
+
+def has_all_support_scope(user: models.User) -> bool:
+    return is_super_admin(user) or user.role.data_scope in ALL_SUPPORT_DATA_SCOPES
+
+
+def support_ticket_scope_filter(user: models.User):
+    if has_all_support_scope(user):
+        return None
+    return or_(
+        models.SupportTicket.requester_id == user.id,
+        models.SupportTicket.current_handler_id == user.id,
+        models.SupportTicket.received_by_id == user.id,
+        models.SupportTicket.deployed_by_id == user.id,
+    )
+
+
+def can_view_support_ticket(user: models.User, ticket: models.SupportTicket) -> bool:
+    if has_all_support_scope(user):
+        return True
+    return user.id in {
+        ticket.requester_id,
+        ticket.current_handler_id,
+        ticket.received_by_id,
+        ticket.deployed_by_id,
+    }
+
+
+def require_support_ticket_access(user: models.User, ticket: models.SupportTicket) -> None:
+    if not can_view_support_ticket(user, ticket):
+        raise HTTPException(status_code=403, detail="仅可查看与自己相关的支持单")
+
+
 def require_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> models.User:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -67,7 +115,7 @@ def user_read(user: models.User) -> dict:
         "dept": user.dept,
         "roles": [user.role.name],
         "roleId": user.role_id,
-        "menus": split_csv(user.role.menus),
+        "menus": effective_menus(user),
         "credentialPolicy": user.role.credential_policy,
     }
 
@@ -207,17 +255,17 @@ def require_deployment_ticket(db: Session, ticket_id: int) -> models.SupportTick
 
 
 def require_ops_leader(user: models.User) -> None:
-    if user.role.name != "运维 Leader":
+    if user.role.name != "运维 Leader" and not is_super_admin(user):
         raise HTTPException(status_code=403, detail="仅运维 Leader 可以执行该操作")
 
 
 def require_system_admin(user: models.User) -> None:
-    if user.role.name != "系统管理员":
+    if not is_super_admin(user):
         raise HTTPException(status_code=403, detail="仅系统管理员可以执行该操作")
 
 
 def require_deployment_requester(user: models.User) -> None:
-    if user.role.name not in {"交付人员", "系统管理员"}:
+    if user.role.name != "交付人员" and not is_super_admin(user):
         raise HTTPException(status_code=403, detail="仅交付人员可以提交项目部署申请")
 
 
@@ -417,7 +465,7 @@ def profile(current_user: models.User = Depends(require_user)):
 
 @app.get("/api/auth/menus")
 def menus(current_user: models.User = Depends(require_user)):
-    return ok(split_csv(current_user.role.menus))
+    return ok(effective_menus(current_user))
 
 
 @app.get("/api/customers")
@@ -612,21 +660,56 @@ def list_assets(
 
 
 @app.get("/api/support-tickets")
-def list_support_tickets(supportType: str = "", keyword: str = "", db: Session = Depends(get_db), _: models.User = Depends(require_user)):
-    query = select(models.SupportTicket).order_by(models.SupportTicket.id.desc())
+def list_support_tickets(
+    supportType: str = "",
+    keyword: str = "",
+    pageNo: int = 1,
+    pageSize: int = 20,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_user),
+):
+    if pageNo < 1 or pageSize < 1 or pageSize > 200:
+        raise HTTPException(status_code=422, detail="分页参数无效")
+    filters = []
+    scope_filter = support_ticket_scope_filter(current_user)
+    if scope_filter is not None:
+        filters.append(scope_filter)
     if supportType:
-        query = query.where(models.SupportTicket.support_type == supportType)
+        filters.append(models.SupportTicket.support_type == supportType)
     if keyword:
-        query = query.where(or_(models.SupportTicket.title.contains(keyword), models.SupportTicket.project_name.contains(keyword), models.SupportTicket.description.contains(keyword)))
-    return page([ticket_read(item) for item in db.scalars(query).all()])
+        filters.append(or_(
+            models.SupportTicket.title.contains(keyword),
+            models.SupportTicket.project_name.contains(keyword),
+            models.SupportTicket.description.contains(keyword),
+        ))
+    total = db.scalar(select(func.count(models.SupportTicket.id)).where(*filters)) or 0
+    query = (
+        select(models.SupportTicket)
+        .where(*filters)
+        .order_by(models.SupportTicket.id.desc())
+        .offset((pageNo - 1) * pageSize)
+        .limit(pageSize)
+    )
+    return page(
+        [ticket_read(item) for item in db.scalars(query).all()],
+        page_no=pageNo,
+        page_size=pageSize,
+        total=total,
+    )
 
 
 @app.get("/api/deployment-project-options")
-def deployment_project_options(customerId: int | None = None, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def deployment_project_options(
+    customerId: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_user),
+):
     if customerId is not None:
         get_or_404(db, models.Customer, customerId)
     grouped: dict[tuple[int, str], dict] = {}
     for ticket in deployment_tickets(db, customer_id=customerId):
+        if not can_view_support_ticket(current_user, ticket):
+            continue
         project = grouped.setdefault(
             (ticket.customer_id, ticket.project_name),
             {"customerName": ticket.customer.name, "products": {}},
@@ -715,8 +798,10 @@ def update_support_ticket(
 
 
 @app.get("/api/support-tickets/{ticket_id}")
-def get_support_ticket(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
-    return ok(ticket_read(get_or_404(db, models.SupportTicket, ticket_id)))
+def get_support_ticket(ticket_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
+    ticket = get_or_404(db, models.SupportTicket, ticket_id)
+    require_support_ticket_access(current_user, ticket)
+    return ok(ticket_read(ticket))
 
 
 @app.post("/api/support-tickets/{ticket_id}/receive")
@@ -775,8 +860,9 @@ def complete_deployment(
     current_user: models.User = Depends(require_user),
 ):
     ticket = require_deployment_ticket(db, ticket_id)
+    require_support_ticket_access(current_user, ticket)
     require_ticket_status(ticket, {"部署中"}, "完成部署")
-    if ticket.current_handler_id != current_user.id:
+    if ticket.current_handler_id != current_user.id and not is_super_admin(current_user):
         raise HTTPException(status_code=403, detail="仅当前部署负责人可以完成部署")
 
     products = ticket_products(ticket)
@@ -810,8 +896,9 @@ def complete_deployment(
         raise HTTPException(status_code=409, detail="该部署工单的资产已经生成") from exc
 
 
-def mutate_ticket(ticket_id: int, action: Callable[[models.SupportTicket], None], db: Session) -> dict:
+def mutate_ticket(ticket_id: int, action: Callable[[models.SupportTicket], None], db: Session, current_user: models.User) -> dict:
     ticket = get_or_404(db, models.SupportTicket, ticket_id)
+    require_support_ticket_access(current_user, ticket)
     reject_generic_deployment_mutation(ticket)
     action(ticket)
     db.commit()
@@ -820,28 +907,38 @@ def mutate_ticket(ticket_id: int, action: Callable[[models.SupportTicket], None]
 
 
 @app.post("/api/support-tickets/{ticket_id}/handle")
-def handle_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def handle_ticket(
+    ticket_id: int,
+    payload: schemas.TicketAction,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_user),
+):
     def action(ticket: models.SupportTicket):
         ticket.status = payload.next_status or "待交付确认"
         if payload.handler_id:
             ticket.current_handler_id = payload.handler_id
-    return ok(mutate_ticket(ticket_id, action, db))
+    return ok(mutate_ticket(ticket_id, action, db, current_user))
 
 
 @app.post("/api/support-tickets/{ticket_id}/transfer")
-def transfer_ticket(ticket_id: int, payload: schemas.TicketAction, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def transfer_ticket(
+    ticket_id: int,
+    payload: schemas.TicketAction,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_user),
+):
     def action(ticket: models.SupportTicket):
         ticket.status = payload.next_status or "待研发处理"
         ticket.current_handler_id = payload.handler_id
-    return ok(mutate_ticket(ticket_id, action, db))
+    return ok(mutate_ticket(ticket_id, action, db, current_user))
 
 
 @app.post("/api/support-tickets/{ticket_id}/close")
-def close_ticket(ticket_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_user)):
+def close_ticket(ticket_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_user)):
     def action(ticket: models.SupportTicket):
         ticket.status = "已关闭"
         ticket.closed_at = datetime.utcnow()
-    return ok(mutate_ticket(ticket_id, action, db))
+    return ok(mutate_ticket(ticket_id, action, db, current_user))
 
 
 @app.get("/api/credentials")

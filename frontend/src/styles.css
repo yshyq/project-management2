@@ -260,6 +260,20 @@ h2 { margin-bottom: 4px; font-size: 18px; }
 .table-row { cursor: pointer; }
 .table-row:hover { border-color: #31527c; background: #12243c; }
 .table-row.selected { border-color: var(--blue); background: linear-gradient(90deg, var(--theme-soft), transparent); box-shadow: inset 3px 0 0 var(--blue); }
+.support-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .empty-state { padding: 14px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); background: #0c1829; }
 .badge { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; border: 1px solid transparent; border-radius: 999px; padding: 0 9px; font-size: 12px; font-weight: 800; }
 .badge.blue { color: var(--theme-hover); background: var(--theme-soft); border-color: var(--theme-focus); }

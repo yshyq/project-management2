@@ -10,6 +10,14 @@ interface AuthState {
   loading: boolean;
 }
 
+const collaborativeSupportMenus = new Set([
+  "customerInfo",
+  "supportDeploy",
+  "supportTech",
+  "supportNeed",
+  "supportOther"
+]);
+
 export const useAuthStore = defineStore("auth", {
   state: (): AuthState => ({
     profile: null,
@@ -24,7 +32,7 @@ export const useAuthStore = defineStore("auth", {
   },
   actions: {
     canSee(menuKey: string) {
-      return this.menus.includes(menuKey);
+      return collaborativeSupportMenus.has(menuKey) || this.menus.includes(menuKey);
     },
     async login(username: string, password: string) {
       this.loading = true;

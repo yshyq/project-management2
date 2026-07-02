@@ -67,7 +67,11 @@ async function openSupportForm(page, path, supportType) {
   await page.getByRole("button", { name: `新建${supportType}`, exact: true }).click();
   const modal = page.locator(".modal");
   await expect(modal).toBeVisible();
-  await expect.poll(() => modal.locator('select[name="customerId"] option').count()).toBeGreaterThan(1);
+  if (supportType === "项目部署") {
+    await expect.poll(() => modal.locator('select[name="customerId"] option').count()).toBeGreaterThan(1);
+  } else {
+    await expect(modal.locator('select[name="projectName"]')).toBeVisible();
+  }
   return modal;
 }
 
@@ -80,15 +84,10 @@ async function submitProjectSupport(
   const modal = await openSupportForm(page, path, supportType);
   const projectSelect = modal.locator('select[name="projectName"]');
   const productSelect = modal.locator('select[name="productId"]');
-  await expect(projectSelect).toBeDisabled();
+  await expect.poll(() => projectSelect.locator("option").count()).toBeGreaterThan(1);
+  await expect(projectSelect).toBeEnabled();
   await expect(productSelect).toBeDisabled();
 
-  const projectsPromise = page.waitForResponse((response) =>
-    response.url().includes("/api/deployment-project-options?customerId=") && response.request().method() === "GET"
-  );
-  await modal.locator('select[name="customerId"]').selectOption({ label: deployedCustomer });
-  expect((await projectsPromise).status()).toBe(200);
-  await expect(projectSelect).toBeEnabled();
   await projectSelect.selectOption({ label: projectName });
   await productSelect.selectOption({ label: deployedProducts[0] });
   await modal.locator('input[name="title"]').fill(title);
@@ -144,17 +143,13 @@ test.describe.serial("支持申请真实浏览器闭环", () => {
       const technicalModal = await openSupportForm(page, "/support/technical", "技术支持");
       const projectSelect = technicalModal.locator('select[name="projectName"]');
       const productSelect = technicalModal.locator('select[name="productId"]');
-      await expect(projectSelect).toBeDisabled();
+      await expect(technicalModal.locator('select[name="customerId"]')).toHaveCount(0);
+      await expect.poll(() => projectSelect.locator("option").count()).toBeGreaterThan(1);
+      await expect(projectSelect).toBeEnabled();
       await expect(productSelect).toBeDisabled();
 
-      await technicalModal.locator('select[name="customerId"]').selectOption({ label: deployedCustomer });
       await projectSelect.selectOption({ label: projectName });
       await productSelect.selectOption({ label: deployedProducts[0] });
-      await technicalModal.locator('select[name="customerId"]').selectOption({ label: emptyCustomer });
-      await expect(projectSelect).toHaveValue("");
-      await expect(productSelect).toHaveValue("");
-      await expect(productSelect).toBeDisabled();
-      await expect(technicalModal.getByText("该客户暂无已部署项目", { exact: true })).toBeVisible();
       await technicalModal.getByRole("button", { name: "取消", exact: true }).click();
 
       await submitProjectSupport(page, "/support/technical", "技术支持", `${runId}-技术支持`);
@@ -187,7 +182,6 @@ test.describe.serial("支持申请真实浏览器闭环", () => {
         });
       });
       const modal = await openSupportForm(page, "/support/technical", "技术支持");
-      await modal.locator('select[name="customerId"]').selectOption({ label: "华东产业园" });
       await expect(modal.getByText("E2E 模拟项目选项失败", { exact: true })).toBeVisible();
       await expect(modal.locator('select[name="productId"]')).toBeDisabled();
 

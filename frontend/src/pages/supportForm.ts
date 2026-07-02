@@ -47,15 +47,18 @@ export function clearAfterProjectChange(form: SupportRequestForm, projectName: s
 }
 
 export function selectDeploymentProject(form: SupportRequestForm, project: DeploymentProject | null) {
+  form.customerId = project?.customerId ?? null;
   form.projectName = project?.projectName ?? "";
   form.productId = null;
 }
 
 export function validateSupportForm(form: SupportRequestForm, isDeployment: boolean): SupportFormErrors {
   const errors: SupportFormErrors = {};
-  if (!form.customerId) errors.customerId = "请选择客户";
+  if (isDeployment && !form.customerId) errors.customerId = "请选择客户";
   if (!form.projectName.trim()) {
     errors.projectName = isDeployment ? "请填写项目名称" : "请选择已部署项目";
+  } else if (!isDeployment && !form.customerId) {
+    errors.projectName = "请选择已部署项目";
   }
   if (isDeployment) {
     if (!form.productIds.length) errors.productIds = "请至少选择一个产品";

@@ -2,7 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "../stores/auth";
-import type { Profile, SupportTicket } from "../api/types";
+import type { PageResult, Profile, SupportTicket } from "../api/types";
 import SupportPage from "./SupportPage.vue";
 
 const apiMock = vi.hoisted(() => ({
@@ -73,7 +73,12 @@ function deploymentTicket(overrides: Partial<SupportTicket> = {}): SupportTicket
 
 async function mountPage(
   supportType: string,
-  options: { profile?: Profile; tickets?: SupportTicket[]; openCreate?: boolean } = {}
+  options: {
+    profile?: Profile;
+    tickets?: SupportTicket[];
+    ticketPage?: Partial<PageResult<SupportTicket>>;
+    openCreate?: boolean;
+  } = {}
 ) {
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -81,9 +86,9 @@ async function mountPage(
   auth.profile = options.profile || baseProfile;
   apiMock.tickets.mockResolvedValue({
     list: options.tickets || [],
-    page: 1,
-    pageSize: 20,
-    total: options.tickets?.length || 0
+    page: options.ticketPage?.page ?? 1,
+    pageSize: options.ticketPage?.pageSize ?? 20,
+    total: options.ticketPage?.total ?? options.tickets?.length ?? 0
   });
   const wrapper = mount(SupportPage, {
     props: { supportType },
@@ -129,6 +134,68 @@ beforeEach(() => {
   apiMock.assets.mockResolvedValue({ list: [], page: 1, pageSize: 20, total: 0 });
 });
 
+describe("support ticket list", () => {
+  it("queries the selected page and renders pagination controls", async () => {
+    const firstPageTicket = deploymentTicket({
+      id: 101,
+      ticketNo: "SUP-101",
+      projectName: "第一页项目",
+      title: "第一页部署标题"
+    });
+    const secondPageTicket = deploymentTicket({
+      id: 102,
+      ticketNo: "SUP-102",
+      projectName: "第二页项目",
+      title: "第二页部署标题"
+    });
+    const wrapper = await mountPage("项目部署", {
+      tickets: [firstPageTicket],
+      ticketPage: { page: 1, pageSize: 1, total: 2 },
+      openCreate: false
+    });
+
+    expect(apiMock.tickets).toHaveBeenLastCalledWith("项目部署", "", 1, 20);
+    expect(wrapper.text()).toContain("共 2 条");
+    expect(wrapper.text()).toContain("第 1 / 2 页");
+
+    apiMock.tickets.mockResolvedValueOnce({ list: [secondPageTicket], page: 2, pageSize: 1, total: 2 });
+    await wrapper.get('[data-test="next-page"]').trigger("click");
+    await flushPromises();
+
+    expect(apiMock.tickets).toHaveBeenLastCalledWith("项目部署", "", 2, 1);
+    expect(wrapper.text()).toContain("第二页项目");
+    expect(wrapper.text()).toContain("第 2 / 2 页");
+  });
+
+  it("uses project name as the deployment query column", async () => {
+    const wrapper = await mountPage("项目部署", {
+      tickets: [deploymentTicket({ projectName: "生产平台", title: "部署申请标题" })],
+      openCreate: false
+    });
+
+    expect(wrapper.find(".table-head").text()).toContain("项目名称");
+    expect(wrapper.find(".table-head").text()).not.toContain("标题");
+    expect(wrapper.find(".detail-side .panel-head").text()).toContain("生产平台");
+  });
+
+  it("uses project name instead of customer in non-deployment support lists", async () => {
+    const wrapper = await mountPage("技术支持", {
+      tickets: [deploymentTicket({
+        supportType: "技术支持",
+        customerName: "华东客户",
+        projectName: "生产平台",
+        title: "登录异常"
+      })],
+      openCreate: false
+    });
+
+    expect(wrapper.find(".table-head").text()).toContain("项目名称");
+    expect(wrapper.find(".table-head").text()).not.toContain("客户");
+    expect(wrapper.find(".meta-grid").text()).toContain("项目名称");
+    expect(wrapper.find(".meta-grid").text()).not.toContain("客户");
+  });
+});
+
 describe("deployment request form", () => {
   it("uses a required project text input and product multi-select controls", async () => {
     const wrapper = await mountPage("项目部署");
@@ -163,7 +230,7 @@ describe("deployment request form", () => {
 });
 
 describe("existing project support form", () => {
-  it("loads projects after customer selection and products after project selection", async () => {
+  it("loads all deployed projects when opened and products after project selection", async () => {
     apiMock.deploymentProjects.mockResolvedValue([
       { customerId: 1, customerName: "华东客户", projectName: "生产平台", products: [products[0]] },
     ]);
@@ -171,58 +238,68 @@ describe("existing project support form", () => {
     const projectSelect = wrapper.get('[name="projectName"]');
     const productSelect = wrapper.get('[name="productId"]');
 
-    expect(wrapper.find('[name="customerId"]').exists()).toBe(true);
+    expect(wrapper.find('[name="customerId"]').exists()).toBe(false);
     expect(apiMock.customers).toHaveBeenCalled();
     expect(apiMock.products).not.toHaveBeenCalled();
-    expect(apiMock.deploymentProjects).not.toHaveBeenCalled();
-    expect(projectSelect.attributes("disabled")).toBeDefined();
+    expect(apiMock.deploymentProjects).toHaveBeenCalledWith();
+    expect(projectSelect.attributes("disabled")).toBeUndefined();
     expect(productSelect.attributes("disabled")).toBeDefined();
 
-    await wrapper.get('[name="customerId"]').setValue("1");
-    await flushPromises();
-    expect(apiMock.deploymentProjects).toHaveBeenCalledWith(1);
-    expect(projectSelect.attributes("disabled")).toBeUndefined();
-
-    await projectSelect.setValue("生产平台");
+    await projectSelect.setValue("1::生产平台");
     await flushPromises();
     expect(productSelect.attributes("disabled")).toBeUndefined();
     expect(productSelect.findAll("option").map((option) => option.text())).toContain("edhr");
   });
 
-  it("clears stale project and product when the customer changes", async () => {
+  it("clears stale product when the project changes", async () => {
     apiMock.deploymentProjects.mockResolvedValue([
       { customerId: 1, customerName: "华东客户", projectName: "生产平台", products: [products[0]] },
+      { customerId: 2, customerName: "华南客户", projectName: "数据平台", products: [products[1]] }
     ]);
     const wrapper = await mountPage("项目需求");
 
-    await wrapper.get('[name="customerId"]').setValue("1");
-    await flushPromises();
-    await wrapper.get('[name="projectName"]').setValue("生产平台");
+    await wrapper.get('[name="projectName"]').setValue("1::生产平台");
     await wrapper.get('[name="productId"]').setValue("3");
-    await wrapper.get('[name="customerId"]').setValue("2");
+    await wrapper.get('[name="projectName"]').setValue("2::数据平台");
     await flushPromises();
 
-    expect((wrapper.get('[name="projectName"]').element as HTMLSelectElement).value).toBe("");
+    expect((wrapper.get('[name="projectName"]').element as HTMLSelectElement).value).toBe("2::数据平台");
     expect((wrapper.get('[name="productId"]').element as HTMLSelectElement).value).toBe("");
   });
 
-  it("shows a clear empty state when the selected customer has no deployed projects", async () => {
+  it("shows a clear empty state when there are no deployed projects", async () => {
     const wrapper = await mountPage("其他支持");
 
-    await wrapper.get('[name="customerId"]').setValue("1");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("该客户暂无已部署项目");
+    expect(wrapper.text()).toContain("暂无已部署项目");
   });
 
-  it("shows the project loading error after customer selection", async () => {
+  it("shows the project loading error after opening the form", async () => {
     apiMock.deploymentProjects.mockRejectedValue(new Error("项目选项加载失败"));
 
     const wrapper = await mountPage("技术支持");
-    await wrapper.get('[name="customerId"]').setValue("1");
-    await flushPromises();
 
     expect(wrapper.text()).toContain("项目选项加载失败");
+  });
+
+  it("submits non-deployment support with the selected project's customer", async () => {
+    apiMock.deploymentProjects.mockResolvedValue([
+      { customerId: 2, customerName: "华南客户", projectName: "数据平台", products: [products[1]] }
+    ]);
+    const wrapper = await mountPage("其他支持");
+
+    await wrapper.get('[name="projectName"]').setValue("2::数据平台");
+    await wrapper.get('[name="productId"]').setValue("5");
+    await wrapper.get('[name="title"]').setValue("巡检支持");
+    await wrapper.get('[data-test="submit-ticket"]').trigger("click");
+    await flushPromises();
+
+    expect(apiMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      supportType: "其他支持",
+      customerId: 2,
+      projectName: "数据平台",
+      productId: 5,
+      title: "巡检支持"
+    }));
   });
 });
 
